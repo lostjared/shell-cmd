@@ -19,7 +19,7 @@ make -j4
 sudo make install
 ```
 
-This command compiles the `shell-cmd.cpp` file and outputs an executable named `shell-cmd`.
+This command compiles the `cmd.cpp` file and outputs an executable named `shell-cmd`.
 
 ## Usage
 
