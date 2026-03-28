@@ -406,6 +406,9 @@ int System(const std::string &command) {
     sigprocmask(SIG_SETMASK, &omask, NULL);
     sigaction(SIGINT, &sa_origint, NULL);
     sigaction(SIGQUIT, &sa_oquit, NULL);
+    // If the child was killed by SIGINT, flag the parent to exit cleanly
+    if (WIFSIGNALED(status) && WTERMSIG(status) == SIGINT)
+        interrupted = 1;
     errno = serrno;
     return status;
 }
@@ -510,6 +513,8 @@ bool proc_cmd(const std::string &cmd, std::span<const std::string> text) {
 
     int ret = System(r);
     stats.commands_run++;
+    if (interrupted)
+        return false;
     if (ret != 0) {
         stats.commands_failed++;
         if (opts.stop_on_error) {
