@@ -29,47 +29,51 @@
 namespace fs = std::filesystem;
 
 /// @brief Comparison operator for size and time filters.
-enum class CmpOp { EQ, LT, GT };
+enum class CmpOp {
+    EQ,
+    LT,
+    GT
+};
 
 /// @brief Holds a parsed size filter with comparison operator and byte threshold.
 struct SizeFilter {
-    bool active = false;      ///< Whether this filter is enabled.
-    CmpOp op = CmpOp::EQ;    ///< Comparison direction (equal, less-than, greater-than).
-    uintmax_t bytes = 0;      ///< Size threshold in bytes.
+    bool active = false;  ///< Whether this filter is enabled.
+    CmpOp op = CmpOp::EQ; ///< Comparison direction (equal, less-than, greater-than).
+    uintmax_t bytes = 0;  ///< Size threshold in bytes.
 };
 
 /// @brief Holds a parsed modification-time filter with comparison operator and day count.
 struct TimeFilter {
-    bool active = false;      ///< Whether this filter is enabled.
-    CmpOp op = CmpOp::EQ;    ///< Comparison direction.
-    int days = 0;             ///< Age threshold in days.
+    bool active = false;  ///< Whether this filter is enabled.
+    CmpOp op = CmpOp::EQ; ///< Comparison direction.
+    int days = 0;         ///< Age threshold in days.
 };
 
 /// @brief Aggregates all runtime options parsed from the command line.
 struct Options {
-    bool dry_run = false;            ///< Print commands without executing.
-    bool verbose = false;            ///< Print commands before executing.
-    bool hidden = false;             ///< Include hidden (dot) files/directories.
-    int max_depth = -1;              ///< Max recursion depth (-1 = unlimited).
-    SizeFilter size_filter;          ///< Optional size filter.
-    TimeFilter mtime_filter;         ///< Optional modification-time filter.
-    std::string perm_filter;         ///< Octal permission string, e.g. "755".
-    std::string user_filter;         ///< Owner username filter.
-    std::string group_filter;        ///< Group name filter.
-    char type_filter = 0;            ///< Type filter: 'f' file, 'd' directory, 'l' symlink.
-    std::string exclude_pattern;     ///< Regex pattern to exclude files/dirs.
-    bool stop_on_error = false;      ///< Halt on first command failure.
-    bool confirm = false;            ///< Prompt for confirmation before each command.
-    int jobs = 1;                    ///< Number of parallel jobs (1 = sequential).
+    bool dry_run = false;        ///< Print commands without executing.
+    bool verbose = false;        ///< Print commands before executing.
+    bool hidden = false;         ///< Include hidden (dot) files/directories.
+    int max_depth = -1;          ///< Max recursion depth (-1 = unlimited).
+    SizeFilter size_filter;      ///< Optional size filter.
+    TimeFilter mtime_filter;     ///< Optional modification-time filter.
+    std::string perm_filter;     ///< Octal permission string, e.g. "755".
+    std::string user_filter;     ///< Owner username filter.
+    std::string group_filter;    ///< Group name filter.
+    char type_filter = 0;        ///< Type filter: 'f' file, 'd' directory, 'l' symlink.
+    std::string exclude_pattern; ///< Regex pattern to exclude files/dirs.
+    bool stop_on_error = false;  ///< Halt on first command failure.
+    bool confirm = false;        ///< Prompt for confirmation before each command.
+    int jobs = 1;                ///< Number of parallel jobs (1 = sequential).
 };
 
-static Options opts;  ///< Global runtime options.
+static Options opts; ///< Global runtime options.
 
 /// @brief Tracks execution statistics printed in the summary.
 struct Stats {
-    int files_matched = 0;    ///< Number of entries that matched all filters.
-    int commands_run = 0;     ///< Number of commands executed (or printed in dry-run).
-    int commands_failed = 0;  ///< Number of commands that returned non-zero.
+    int files_matched = 0;   ///< Number of entries that matched all filters.
+    int commands_run = 0;    ///< Number of commands executed (or printed in dry-run).
+    int commands_failed = 0; ///< Number of commands that returned non-zero.
 };
 
 static Stats stats;                   ///< Global execution statistics.
@@ -157,66 +161,96 @@ bool matches_filters(const fs::directory_entry &entry) {
     if (opts.type_filter != 0) {
         switch (opts.type_filter) {
         case 'f':
-            if (!entry.is_regular_file(ec)) return false;
+            if (!entry.is_regular_file(ec))
+                return false;
             break;
         case 'd':
-            if (!entry.is_directory(ec)) return false;
+            if (!entry.is_directory(ec))
+                return false;
             break;
         case 'l':
-            if (!entry.is_symlink(ec)) return false;
+            if (!entry.is_symlink(ec))
+                return false;
             break;
         }
     }
 
     // Size filter (only meaningful for regular files)
     if (opts.size_filter.active) {
-        if (!entry.is_regular_file(ec)) return false;
+        if (!entry.is_regular_file(ec))
+            return false;
         auto sz = entry.file_size(ec);
-        if (ec) return false;
+        if (ec)
+            return false;
         switch (opts.size_filter.op) {
-        case CmpOp::GT: if (sz <= opts.size_filter.bytes) return false; break;
-        case CmpOp::LT: if (sz >= opts.size_filter.bytes) return false; break;
-        case CmpOp::EQ: if (sz != opts.size_filter.bytes) return false; break;
+        case CmpOp::GT:
+            if (sz <= opts.size_filter.bytes)
+                return false;
+            break;
+        case CmpOp::LT:
+            if (sz >= opts.size_filter.bytes)
+                return false;
+            break;
+        case CmpOp::EQ:
+            if (sz != opts.size_filter.bytes)
+                return false;
+            break;
         }
     }
 
     // Modification time filter
     if (opts.mtime_filter.active) {
         auto ftime = entry.last_write_time(ec);
-        if (ec) return false;
+        if (ec)
+            return false;
         auto sctp = std::chrono::clock_cast<std::chrono::system_clock>(ftime);
         auto now = std::chrono::system_clock::now();
         auto age = std::chrono::duration_cast<std::chrono::hours>(now - sctp).count() / 24;
         switch (opts.mtime_filter.op) {
-        case CmpOp::GT: if (age <= opts.mtime_filter.days) return false; break;
-        case CmpOp::LT: if (age >= opts.mtime_filter.days) return false; break;
-        case CmpOp::EQ: if (age != opts.mtime_filter.days) return false; break;
+        case CmpOp::GT:
+            if (age <= opts.mtime_filter.days)
+                return false;
+            break;
+        case CmpOp::LT:
+            if (age >= opts.mtime_filter.days)
+                return false;
+            break;
+        case CmpOp::EQ:
+            if (age != opts.mtime_filter.days)
+                return false;
+            break;
         }
     }
 
     // Permission filter (octal comparison)
     if (!opts.perm_filter.empty()) {
         struct stat st;
-        if (stat(entry.path().c_str(), &st) != 0) return false;
+        if (stat(entry.path().c_str(), &st) != 0)
+            return false;
         auto mode = st.st_mode & 07777;
         auto target = static_cast<mode_t>(std::stoul(opts.perm_filter, nullptr, 8));
-        if (mode != target) return false;
+        if (mode != target)
+            return false;
     }
 
     // User filter
     if (!opts.user_filter.empty()) {
         struct stat st;
-        if (stat(entry.path().c_str(), &st) != 0) return false;
+        if (stat(entry.path().c_str(), &st) != 0)
+            return false;
         struct passwd *pw = getpwuid(st.st_uid);
-        if (!pw || opts.user_filter != pw->pw_name) return false;
+        if (!pw || opts.user_filter != pw->pw_name)
+            return false;
     }
 
     // Group filter
     if (!opts.group_filter.empty()) {
         struct stat st;
-        if (stat(entry.path().c_str(), &st) != 0) return false;
+        if (stat(entry.path().c_str(), &st) != 0)
+            return false;
         struct group *gr = getgrgid(st.st_gid);
-        if (!gr || opts.group_filter != gr->gr_name) return false;
+        if (!gr || opts.group_filter != gr->gr_name)
+            return false;
     }
 
     return true;
@@ -249,7 +283,8 @@ std::string replace_string(std::string orig, const std::string &with, const std:
 void add_directory(const fs::path &path, const std::string &cmd, const std::string &regex_str, std::vector<std::string> &args, int depth) {
     if (opts.max_depth >= 0 && depth > opts.max_depth)
         return;
-    if (stop_requested) return;
+    if (stop_requested)
+        return;
 
     std::error_code ec;
     auto dir = fs::directory_iterator(path, fs::directory_options::skip_permission_denied, ec);
@@ -259,7 +294,8 @@ void add_directory(const fs::path &path, const std::string &cmd, const std::stri
     }
 
     for (const auto &entry : dir) {
-        if (stop_requested) return;
+        if (stop_requested)
+            return;
         auto filename = entry.path().filename().string();
         if (!opts.hidden && filename.starts_with('.'))
             continue;
@@ -279,7 +315,8 @@ void add_directory(const fs::path &path, const std::string &cmd, const std::stri
                 if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
                     stats.files_matched++;
                     args[0] = fullpath;
-                    if (!proc_cmd(cmd, args)) return;
+                    if (!proc_cmd(cmd, args))
+                        return;
                 }
             }
             add_directory(entry.path(), cmd, regex_str, args, depth + 1);
@@ -289,7 +326,8 @@ void add_directory(const fs::path &path, const std::string &cmd, const std::stri
             if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
                 stats.files_matched++;
                 args[0] = fullpath;
-                if (!proc_cmd(cmd, args)) return;
+                if (!proc_cmd(cmd, args))
+                    return;
             }
         } else if (entry.is_regular_file(ec) || (entry.is_symlink(ec) && opts.type_filter == 0)) {
             std::regex ex(regex_str);
@@ -297,7 +335,8 @@ void add_directory(const fs::path &path, const std::string &cmd, const std::stri
             if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
                 stats.files_matched++;
                 args[0] = fullpath;
-                if (!proc_cmd(cmd, args)) return;
+                if (!proc_cmd(cmd, args))
+                    return;
             }
         }
     }
@@ -444,7 +483,8 @@ bool proc_cmd(const std::string &cmd, std::span<const std::string> text) {
 
     if (opts.jobs > 1) {
         wait_for_slot();
-        if (stop_requested) return false;
+        if (stop_requested)
+            return false;
         pid_t pid = fork();
         if (pid == 0) {
             execl("/bin/sh", "sh", "-c", r.c_str(), static_cast<char *>(nullptr));
@@ -616,7 +656,8 @@ int main(int argc, char **argv) {
             case 'j':
             case 'J':
                 opts.jobs = std::stoi(arg.arg_value);
-                if (opts.jobs < 1) opts.jobs = 1;
+                if (opts.jobs < 1)
+                    opts.jobs = 1;
                 break;
             case 'h':
             case 'H':
@@ -660,7 +701,7 @@ int main(int argc, char **argv) {
 
     if (opts.verbose || opts.dry_run || stats.commands_failed > 0) {
         std::cerr << std::format("\nSummary: {} matched, {} run, {} failed\n",
-            stats.files_matched, stats.commands_run, stats.commands_failed);
+                                 stats.files_matched, stats.commands_run, stats.commands_failed);
     }
 
     return stats.commands_failed > 0 ? EXIT_FAILURE : 0;
