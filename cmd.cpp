@@ -65,6 +65,8 @@ struct Options {
     bool stop_on_error = false;  ///< Halt on first command failure.
     bool confirm = false;        ///< Prompt for confirmation before each command.
     int jobs = 1;                ///< Number of parallel jobs (1 = sequential).
+    std::string shell = "/bin/bash"; ///< Shell to use for command execution.
+    std::string shell_name = "bash"; ///< Shell argv[0] name.
 };
 
 static Options opts; ///< Global runtime options.
@@ -356,7 +358,7 @@ void add_directory(const fs::path &path, const std::string &cmd, const std::stri
  * @details Blocks SIGCHLD and ignores SIGINT/SIGQUIT in the parent process
  *          to prevent interrupted batch operations. Restores all signal masks
  *          after the child exits.
- * @param command The shell command string to execute via /bin/bash -c.
+ * @param command The shell command string to execute via the configured shell.
  * @return The child's exit status from waitpid, or -1 on fork failure.
  */
 int System(const std::string &command) {
@@ -395,7 +397,7 @@ int System(const std::string &command) {
         if (sa_oquit.sa_handler != SIG_IGN)
             sigaction(SIGQUIT, &sa_default, NULL);
 
-        execl("/bin/bash", "bash", "-c", command.c_str(), static_cast<char *>(nullptr));
+        execl(opts.shell.c_str(), opts.shell_name.c_str(), "-c", command.c_str(), static_cast<char *>(nullptr));
         _exit(127);
         break;
     default:
@@ -506,7 +508,7 @@ bool proc_cmd(const std::string &cmd, std::span<const std::string> text) {
             return false;
         pid_t pid = fork();
         if (pid == 0) {
-            execl("/bin/bash", "bash", "-c", r.c_str(), static_cast<char *>(nullptr));
+            execl(opts.shell.c_str(), opts.shell_name.c_str(), "-c", r.c_str(), static_cast<char *>(nullptr));
             _exit(127);
         } else if (pid > 0) {
             child_pids.push_back(pid);
@@ -564,6 +566,7 @@ void print_help(const char *prog) {
         "  -e, --stop-on-error stop on first command failure\n"
         "  -c, --confirm       prompt for confirmation before each command\n"
         "  -j, --jobs N        run N commands in parallel (default: 1)\n"
+        "  -w, --shell SHELL   shell to use for execution (default: /bin/bash)\n"
         "  -h, --help          show this help\n",
         prog);
 }
@@ -614,6 +617,8 @@ int main(int argc, char **argv) {
         .addOptionDouble('C', "confirm", "confirm mode")
         .addOptionSingleValue('j', "parallel jobs")
         .addOptionDoubleValue('J', "jobs", "parallel jobs")
+        .addOptionSingleValue('w', "shell path")
+        .addOptionDoubleValue('W', "shell", "shell path")
         .addOptionSingle('h', "show help")
         .addOptionDouble('H', "help", "show help");
 
@@ -687,6 +692,13 @@ int main(int argc, char **argv) {
                 if (opts.jobs < 1)
                     opts.jobs = 1;
                 break;
+            case 'w':
+            case 'W': {
+                opts.shell = arg.arg_value;
+                auto slash = opts.shell.rfind('/');
+                opts.shell_name = (slash != std::string::npos) ? opts.shell.substr(slash + 1) : opts.shell;
+                break;
+            }
             case 'h':
             case 'H':
                 print_help(argv[0]);

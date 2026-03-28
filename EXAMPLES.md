@@ -163,4 +163,5 @@ shell-cmd -n -a -d 2 ~ "wc -l %1" ".*\.bashrc|.*\.zshrc"
 | `-v` | Verbose — print before executing |
 | `-a` | Include hidden files/directories |
 | `-d N` | Max recursion depth (0 = current dir only) |
+| `-w SHELL` | Shell to use for execution (default: `/bin/bash`) |
 | `-h` | Show help |

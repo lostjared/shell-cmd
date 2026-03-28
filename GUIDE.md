@@ -15,7 +15,7 @@
 2. Recursively walk the target directory
 3. For each file whose full path matches the regex:
    a. Substitute placeholders in the command template
-   b. Fork a child process and execute the command via /bin/bash
+   b. Fork a child process and execute the command via the configured shell (/bin/bash by default)
 ```
 
 ### Argument Parsing
@@ -62,7 +62,7 @@ Commands are executed through a custom `System()` function. Rather than calling 
 
 1. **Forks** a child process.
 2. **Blocks `SIGCHLD`** and **ignores `SIGINT`/`SIGQUIT`** in the parent so the parent isn't accidentally killed by Ctrl+C.
-3. Runs the command via `execl("/bin/bash", "bash", "-c", command, …)` in the child.
+3. Runs the command via `execl("/bin/bash", "bash", "-c", command, …)` in the child (or the shell specified by `--shell`).
 4. **Waits** for the child to finish, then restores signal masks.
 
 This gives reliable process management and prevents interrupted batch operations from leaving the parent in a bad state.
@@ -131,6 +131,7 @@ shell-cmd [options] <path> "<command %1 [%2 %3..]>" <regex> [extra_args..]
 | `-e` | `--stop-on-error` | **Stop on error** — halt on first command failure |
 | `-c` | `--confirm` | **Confirm** — prompt yes/no before each command |
 | `-j N` | `--jobs N` | **Parallel** — run N commands concurrently (default: 1) |
+| `-w SHELL` | `--shell SHELL` | **Shell** — shell to use for execution (default: `/bin/bash`) |
 | `-h` | `--help` | **Help** — show usage information |
 
 ---
