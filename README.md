@@ -1,57 +1,95 @@
-# Shell Command Executor
+# shell-cmd
 
-This utility allows for the execution of shell commands on files matching a specified regex pattern within a directory or its subdirectories. It's particularly useful for batch processing files, such as extracting archives or performing file transformations. The tool was developed as a practice project to explore file system manipulation and process creation in C++.
+Recursively find files matching a regex pattern and execute a shell command for each match.
 
-## Getting Started
+## Build
 
-### Prerequisites
-
-Ensure you have a C++ compiler and the necessary build tools installed on your system to compile the program. The utility uses POSIX APIs, making it suitable for UNIX-like operating systems including Linux and macOS.
-
-### Compilation
-
-To compile the `shell-cmd` utility, navigate to the directory containing the source code and run the following command:
+Requires C++20 (GCC 13+, Clang 16+).
 
 ```bash
-mkdir build && cd build
+mkdir -p build && cd build
 cmake ..
-make -j4
+make
+```
+
+Or install system-wide:
+
+```bash
 sudo make install
 ```
 
-This command compiles the `cmd.cpp` file and outputs an executable named `shell-cmd`.
-
 ## Usage
 
-After compiling the utility, you can use it by specifying a directory path, a command template, and a regex pattern to match filenames. The `%f` placeholder in the command template will be replaced with the full path of each file matching the pattern.
-
-```bash
-shell-cmd <path> "command %f" <regex_search_pattern>
+```
+shell-cmd [options] path "command %1 [%2 %3..]" regex [extra_args..]
 ```
 
-### Examples
+### Placeholders
 
-1. To display the content of all `.txt` files in the current directory and its subdirectories:
+| Placeholder | Description |
+|-------------|-------------|
+| `%0` | Filename only (no path) |
+| `%1` | Full path to matched file |
+| `%2+` | Extra arguments from command line |
 
-    ```bash
-    shell-cmd . "cat %f" .txt
-    ```
+### Options
 
-2. To extract all `.7z` archives in the current directory and its subdirectories:
+| Flag | Description |
+|------|-------------|
+| `-n` | Dry-run — print commands without executing |
+| `-v` | Verbose — print each command before running |
+| `-a` | Include hidden files and directories |
+| `-d depth` | Max recursion depth (0 = current directory only) |
+| `-h` | Show help |
 
-    ```bash
-    shell-cmd . "7z e %f" .7z
-    ```
+## Examples
+
+Count lines in all `.cpp` files:
+
+```bash
+shell-cmd . "wc -l %1" ".*\.cpp$"
+```
+
+Dry-run to preview what would be executed:
+
+```bash
+shell-cmd -n . "clang-format -i %1" ".*\.(cpp|hpp)$"
+```
+
+Copy matched files to a destination, using filename-only placeholder:
+
+```bash
+shell-cmd . "cp %1 /tmp/backup/%0" ".*\.txt$"
+```
+
+Limit search to current directory (no recursion):
+
+```bash
+shell-cmd -d 0 . "cat %1" ".*\.md$"
+```
+
+Use extra arguments — `%2` is replaced with the value passed after the regex:
+
+```bash
+shell-cmd . "cp %1 %2/%0" ".*\.log$" /tmp/logs
+```
+
+Include hidden files:
+
+```bash
+shell-cmd -a ~ "echo %1" ".*\.bashrc"
+```
+
+Extract all `.7z` archives:
+
+```bash
+shell-cmd . "7z e %1" ".*\.7z$"
+```
 
 ## How It Works
 
-The program starts by validating the input arguments to ensure the correct format. It then recursively searches the specified directory and its subdirectories for files matching the given regex pattern. For each matching file, the program replaces the `%f` placeholder in the provided command with the file's path and executes the command.
+The program recursively walks the specified directory using `std::filesystem`. For each file whose path matches the given regex, it substitutes placeholders in the command template and executes it via `/bin/sh`. Hidden files and directories are skipped by default.
 
-## Limitations
+## License
 
-- The utility is designed for UNIX-like operating systems and may not work as expected on non-POSIX systems.
-- Error handling is minimal, primarily focusing on demonstrating the concept.
-
-## Contributing
-
-This project is a practice exercise, and contributions or suggestions for improvements are welcome.
+See [LICENSE](LICENSE).
