@@ -699,9 +699,9 @@ int main(int argc, char **argv) {
 
         if (opts.verbose || opts.dry_run || stats.commands_failed > 0) {
             std::cerr << std::format("\nSummary: {} matched, {} run, {} failed\n",
-                                    stats.files_matched, stats.commands_run, stats.commands_failed);
+                                     stats.files_matched, stats.commands_run, stats.commands_failed);
         }
-    } catch(const std::exception &e) {
+    } catch (const std::exception &e) {
         std::cerr << "Exception: " << e.what() << "\n";
         return EXIT_FAILURE;
     }
