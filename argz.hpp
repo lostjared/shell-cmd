@@ -26,11 +26,13 @@ concept StringType = std::is_class_v<T> && requires(T type) {
     { type = T{} } -> std::same_as<T &>;
 };
 
-enum class ArgType { ARG_SINGLE,
-                     ARG_SINGLE_VALUE,
-                     ARG_DOUBLE,
-                     ARG_DOUBLE_VALUE,
-                     ARG_NONE };
+enum class ArgType {
+    ARG_SINGLE,
+    ARG_SINGLE_VALUE,
+    ARG_DOUBLE,
+    ARG_DOUBLE_VALUE,
+    ARG_NONE
+};
 
 template <StringType String>
 struct Argument {
