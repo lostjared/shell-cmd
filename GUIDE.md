@@ -319,6 +319,60 @@ The program validates that every extra argument has a corresponding placeholder 
 
 ---
 
+## shell-cmd vs `find -exec`
+
+If you're familiar with `find . -exec`, here's how `shell-cmd` compares:
+
+| Feature | `shell-cmd` | `find -exec` |
+|---------|-------------|---------------|
+| **Filename placeholder** | `%0` gives the filename without the path | No equivalent — requires `sh -c` + `basename` |
+| **Full path placeholder** | `%1` | `{}` |
+| **Extra arguments** | `%2`, `%3`, … with validation | Not supported — use shell variables |
+| **Pattern matching** | ECMAScript regex on the full path | Glob (`-name`) or implementation-varying `-regex` |
+| **Dry-run** | Built-in `-n` flag | No native support |
+| **Verbose mode** | Built-in `-v` flag | No native support |
+| **Filtering by metadata** | Not supported | Size, time, permissions, ownership, type, boolean logic |
+| **Portability** | Requires C++20 build | POSIX-standard, available everywhere |
+
+### Side-by-Side Examples
+
+**Copy all `.txt` files to a backup directory, preserving filenames:**
+
+```bash
+# shell-cmd
+shell-cmd . "cp %1 /tmp/backup/%0" ".*\.txt$"
+
+# find equivalent (needs sh -c + basename gymnastics)
+find . -regex '.*\.txt$' -exec sh -c 'cp "$1" "/tmp/backup/$(basename "$1")"' _ {} \;
+```
+
+**Dry-run to preview commands:**
+
+```bash
+# shell-cmd — built-in
+shell-cmd -n . "rm %1" ".*\.bak$"
+
+# find — no native dry-run, must rework the command
+find . -regex '.*\.bak$' -exec echo rm {} \;
+```
+
+**Copy files with an extra destination argument:**
+
+```bash
+# shell-cmd — %2 is injected and validated
+shell-cmd ~/Music "cp %1 %2/%0" ".*\.mp3$" /mnt/backup/music
+
+# find — must hardcode or use a variable
+DEST=/mnt/backup/music find ~/Music -regex '.*\.mp3$' -exec sh -c 'cp "$1" "$DEST/$(basename "$1")"' _ {} \;
+```
+
+### When to Use Which
+
+- **Use `shell-cmd`** when your command needs the filename separated from the path, when you want to inject extra arguments, or when you want built-in dry-run/verbose modes.
+- **Use `find`** when you need to filter by file size, modification time, permissions, ownership, or other metadata — or when you're on a system where you can't compile C++20 code.
+
+---
+
 ## Tips and Best Practices
 
 1. **Always dry-run first.** Use `-n` before running destructive commands (`rm`, `mv`, overwriting files) to verify what will execute.
