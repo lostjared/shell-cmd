@@ -356,7 +356,7 @@ void add_directory(const fs::path &path, const std::string &cmd, const std::stri
  * @details Blocks SIGCHLD and ignores SIGINT/SIGQUIT in the parent process
  *          to prevent interrupted batch operations. Restores all signal masks
  *          after the child exits.
- * @param command The shell command string to execute via /bin/sh -c.
+ * @param command The shell command string to execute via /bin/bash -c.
  * @return The child's exit status from waitpid, or -1 on fork failure.
  */
 int System(const std::string &command) {
@@ -395,7 +395,7 @@ int System(const std::string &command) {
         if (sa_oquit.sa_handler != SIG_IGN)
             sigaction(SIGQUIT, &sa_default, NULL);
 
-        execl("/bin/sh", "sh", "-c", command.c_str(), static_cast<char *>(nullptr));
+        execl("/bin/bash", "bash", "-c", command.c_str(), static_cast<char *>(nullptr));
         _exit(127);
         break;
     default:
@@ -506,7 +506,7 @@ bool proc_cmd(const std::string &cmd, std::span<const std::string> text) {
             return false;
         pid_t pid = fork();
         if (pid == 0) {
-            execl("/bin/sh", "sh", "-c", r.c_str(), static_cast<char *>(nullptr));
+            execl("/bin/bash", "bash", "-c", r.c_str(), static_cast<char *>(nullptr));
             _exit(127);
         } else if (pid > 0) {
             child_pids.push_back(pid);

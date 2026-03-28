@@ -15,7 +15,7 @@
 2. Recursively walk the target directory
 3. For each file whose full path matches the regex:
    a. Substitute placeholders in the command template
-   b. Fork a child process and execute the command via /bin/sh
+   b. Fork a child process and execute the command via /bin/bash
 ```
 
 ### Argument Parsing
@@ -62,7 +62,7 @@ Commands are executed through a custom `System()` function. Rather than calling 
 
 1. **Forks** a child process.
 2. **Blocks `SIGCHLD`** and **ignores `SIGINT`/`SIGQUIT`** in the parent so the parent isn't accidentally killed by Ctrl+C.
-3. Runs the command via `execl("/bin/sh", "sh", "-c", command, …)` in the child.
+3. Runs the command via `execl("/bin/bash", "bash", "-c", command, …)` in the child.
 4. **Waits** for the child to finish, then restores signal masks.
 
 This gives reliable process management and prevents interrupted batch operations from leaving the parent in a bad state.

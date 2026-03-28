@@ -166,7 +166,7 @@ shell-cmd -e ./src "gcc -c %1 -o /tmp/%b.o" ".*\.c$"
 
 ## How It Works
 
-The program recursively walks the specified directory using `std::filesystem`. For each file whose path matches the given regex, it substitutes placeholders in the command template and executes it via `/bin/sh`. Hidden files and directories are skipped by default.
+The program recursively walks the specified directory using `std::filesystem`. For each file whose path matches the given regex, it substitutes placeholders in the command template and executes it via `/bin/bash`. Hidden files and directories are skipped by default.
 
 ## shell-cmd vs `find -exec`
 
