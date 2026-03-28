@@ -79,6 +79,15 @@ struct Stats {
 static Stats stats;                   ///< Global execution statistics.
 static std::vector<pid_t> child_pids; ///< PIDs of outstanding child processes (parallel mode).
 static bool stop_requested = false;   ///< Set to true when stop-on-error triggers.
+static volatile sig_atomic_t interrupted = 0; ///< Set to 1 by SIGINT handler (Ctrl+C).
+
+/**
+ * @brief Signal handler for SIGINT (Ctrl+C).
+ * @details Sets the interrupted flag so the main loop exits cleanly.
+ */
+static void sigint_handler(int /*sig*/) {
+    interrupted = 1;
+}
 
 SizeFilter parse_size_filter(const std::string &s);
 TimeFilter parse_time_filter(const std::string &s);
@@ -283,7 +292,7 @@ std::string replace_string(std::string orig, const std::string &with, const std:
 void add_directory(const fs::path &path, const std::string &cmd, const std::string &regex_str, std::vector<std::string> &args, int depth) {
     if (opts.max_depth >= 0 && depth > opts.max_depth)
         return;
-    if (stop_requested)
+    if (stop_requested || interrupted)
         return;
 
     std::error_code ec;
@@ -294,7 +303,7 @@ void add_directory(const fs::path &path, const std::string &cmd, const std::stri
     }
 
     for (const auto &entry : dir) {
-        if (stop_requested)
+        if (stop_requested || interrupted)
             return;
         auto filename = entry.path().filename().string();
         if (!opts.hidden && filename.starts_with('.'))
@@ -557,6 +566,13 @@ void print_help(const char *prog) {
  * @return EXIT_SUCCESS on success, EXIT_FAILURE if any command failed or input was invalid.
  */
 int main(int argc, char **argv) {
+    // Install SIGINT handler for clean Ctrl+C exit
+    struct sigaction sa_int;
+    sa_int.sa_handler = sigint_handler;
+    sa_int.sa_flags = 0;
+    sigemptyset(&sa_int.sa_mask);
+    sigaction(SIGINT, &sa_int, nullptr);
+
     Argz<std::string> argz(argc, argv);
     argz.addOptionSingle('n', "dry-run mode")
         .addOptionDouble('N', "dry-run", "dry-run mode")
@@ -696,6 +712,21 @@ int main(int argc, char **argv) {
         add_directory(path, input, regex_str, args, 0);
         if (opts.jobs > 1)
             wait_all();
+
+        if (interrupted) {
+            // Kill outstanding child processes
+            for (pid_t pid : child_pids)
+                kill(pid, SIGTERM);
+            for (pid_t pid : child_pids)
+                waitpid(pid, nullptr, 0);
+            child_pids.clear();
+            std::cerr << "\nInterrupted.\n";
+            if (opts.verbose || opts.dry_run || stats.commands_failed > 0 || stats.commands_run > 0) {
+                std::cerr << std::format("Summary: {} matched, {} run, {} failed\n",
+                                         stats.files_matched, stats.commands_run, stats.commands_failed);
+            }
+            return 130;
+        }
 
         if (opts.verbose || opts.dry_run || stats.commands_failed > 0) {
             std::cerr << std::format("\nSummary: {} matched, {} run, {} failed\n",
