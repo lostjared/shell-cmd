@@ -1,0 +1,76 @@
+# Doxyfile for shell-cmd v1.2
+
+#---------------------------------------------------------------------------
+# Project
+#---------------------------------------------------------------------------
+PROJECT_NAME           = "shell-cmd"
+PROJECT_NUMBER         = "v1.2"
+PROJECT_BRIEF          = "Recursively find files matching a regex and execute a shell command for each match."
+PROJECT_LOGO           =
+OUTPUT_DIRECTORY       = docs
+
+#---------------------------------------------------------------------------
+# Input
+#---------------------------------------------------------------------------
+INPUT                  = cmd.cpp argz.hpp README.md
+USE_MDFILE_AS_MAINPAGE = README.md
+FILE_PATTERNS          = *.cpp *.hpp *.h
+RECURSIVE              = NO
+
+#---------------------------------------------------------------------------
+# Build
+#---------------------------------------------------------------------------
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+EXTRACT_ANON_NSPACES   = YES
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = YES
+STRIP_CODE_COMMENTS    = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+GENERATE_TREEVIEW      = YES
+FULL_SIDEBAR           = NO
+SORT_MEMBER_DOCS       = NO
+SORT_BRIEF_DOCS        = NO
+SHOW_INCLUDE_FILES     = YES
+SHOW_USED_FILES        = YES
+SHOW_FILES             = YES
+VERBATIM_HEADERS       = YES
+OPTIMIZE_OUTPUT_FOR_C  = NO
+BUILTIN_STL_SUPPORT    = YES
+TYPEDEF_HIDES_STRUCT   = NO
+NUM_PROC_THREADS       = 1
+
+#---------------------------------------------------------------------------
+# Output formats
+#---------------------------------------------------------------------------
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO
+GENERATE_XML           = NO
+
+#---------------------------------------------------------------------------
+# Dark theme (doxygen-awesome-css)
+#---------------------------------------------------------------------------
+HTML_EXTRA_STYLESHEET  = doxygen-awesome-css/doxygen-awesome.css
+HTML_COLORSTYLE        = DARK
+HTML_COLORSTYLE_HUE    = 209
+HTML_COLORSTYLE_SAT    = 175
+HTML_COLORSTYLE_GAMMA  = 113
+HTML_DYNAMIC_SECTIONS  = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+
+#---------------------------------------------------------------------------
+# Diagrams (graphviz)
+#---------------------------------------------------------------------------
+HAVE_DOT               = YES
+CLASS_DIAGRAMS         = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+GRAPHICAL_HIERARCHY    = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+DOT_TRANSPARENT        = YES

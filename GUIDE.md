@@ -20,7 +20,7 @@
 
 ### Argument Parsing
 
-`shell-cmd` uses a custom header-only argument parser (`argz.hpp`). It separates **options** (`-n`, `-v`, `-a`, `-d`, `-h`) from **positional arguments**. The positional arguments are, in order:
+`shell-cmd` uses a custom header-only argument parser (`argz.hpp`). It separates **options** (short like `-n` or long like `--dry-run`) from **positional arguments**. All options support both forms. The positional arguments are, in order:
 
 | Position | Meaning |
 |----------|---------|
@@ -50,6 +50,8 @@ Inside `proc_cmd()`, the command template string is scanned and placeholders are
 |-------------|---------------|
 | `%0` | The **filename only** (no directory path), extracted via `std::filesystem::path::filename()` |
 | `%1` | The **full path** to the matched file |
+| `%b` | The **basename without extension**, extracted via `std::filesystem::path::stem()` |
+| `%e` | The **file extension** (including the dot), extracted via `std::filesystem::path::extension()` |
 | `%2`, `%3`, … | The **extra arguments** passed after the regex on the command line |
 
 If the full path for `%1` contains spaces, it is automatically wrapped in double quotes to prevent word-splitting by the shell.
@@ -64,6 +66,8 @@ Commands are executed through a custom `System()` function. Rather than calling 
 4. **Waits** for the child to finish, then restores signal masks.
 
 This gives reliable process management and prevents interrupted batch operations from leaving the parent in a bad state.
+
+When **parallel mode** (`-j N`) is active, `proc_cmd()` forks child processes directly and maintains a pool of up to N concurrent workers, bypassing the `System()` function. The `wait_for_slot()` and `wait_all()` helpers manage the process pool.
 
 ---
 
@@ -111,13 +115,23 @@ shell-cmd [options] <path> "<command %1 [%2 %3..]>" <regex> [extra_args..]
 
 ### Options
 
-| Flag | Description |
-|------|-------------|
-| `-n` | **Dry-run** — print each command but don't execute it |
-| `-v` | **Verbose** — print each command before executing it |
-| `-a` | **All files** — include hidden files and directories |
-| `-d N` | **Max depth** — limit recursion (0 = current directory only) |
-| `-h` | **Help** — show usage information |
+| Short | Long | Description |
+|-------|------|-------------|
+| `-n` | `--dry-run` | **Dry-run** — print each command but don’t execute it |
+| `-v` | `--verbose` | **Verbose** — print each command before executing it |
+| `-a` | `--all` | **All files** — include hidden files and directories |
+| `-d N` | `--depth N` | **Max depth** — limit recursion (0 = current directory only) |
+| `-s SIZE` | `--size SIZE` | **Size filter** — `+10M` (>10 MB), `-1K` (<1 KB), `4096` (exact bytes). Suffixes: K, M, G |
+| `-m DAYS` | `--mtime DAYS` | **Modification time** — `+7` (older than 7 days), `-1` (within last day), `3` (exactly 3 days) |
+| `-p MODE` | `--perm MODE` | **Permissions** — octal mode, e.g. `755` |
+| `-u USER` | `--user USER` | **Owner** — filter by username |
+| `-g GROUP` | `--group GROUP` | **Group** — filter by group name |
+| `-t TYPE` | `--type TYPE` | **Type** — `f` (file), `d` (directory), `l` (symlink) |
+| `-x REGEX` | `--exclude REGEX` | **Exclude** — skip files/directories matching the regex |
+| `-e` | `--stop-on-error` | **Stop on error** — halt on first command failure |
+| `-c` | `--confirm` | **Confirm** — prompt yes/no before each command |
+| `-j N` | `--jobs N` | **Parallel** — run N commands concurrently (default: 1) |
+| `-h` | `--help` | **Help** — show usage information |
 
 ---
 
@@ -304,7 +318,151 @@ shell-cmd . "cp %1 %2/%0 && echo 'copied to %3'" ".*\.conf$" /backup user@host
 - `%3` → `user@host`
 
 The program validates that every extra argument has a corresponding placeholder in the command template. If you pass an extra argument but the command doesn't reference its placeholder, `shell-cmd` exits with an error.
+---
 
+## Metadata Filter Examples
+
+### 17. Find Large Files
+
+List all files over 10 MB:
+
+```bash
+shell-cmd . "ls -lh %1" ".*" --size +10M
+```
+
+Or equivalently with short flags:
+
+```bash
+shell-cmd . "ls -lh %1" ".*" -s +10M
+```
+
+### 18. Delete Old Temp Files (Dry-Run)
+
+Preview deleting `.tmp` files older than 30 days:
+
+```bash
+shell-cmd --dry-run /tmp "rm %1" ".*\.tmp$" --mtime +30
+```
+
+### 19. Find Executable Files
+
+Find files with permission `755`:
+
+```bash
+shell-cmd . "echo %1" ".*" --perm 755 --type f
+```
+
+### 20. List Files Owned by a User
+
+```bash
+shell-cmd /etc "echo %1" ".*\.conf$" --user root
+```
+
+### 21. Find Files by Group
+
+```bash
+shell-cmd /var/www "echo %1" ".*" --group www-data
+```
+
+### 22. List Only Directories
+
+```bash
+shell-cmd . "echo %1" ".*src.*" --type d
+```
+
+### 23. Find Symlinks
+
+```bash
+shell-cmd /usr/local "ls -la %1" ".*" --type l
+```
+
+### 24. Combine Multiple Filters
+
+Find large `.log` files modified in the last 7 days, owned by `syslog`:
+
+```bash
+shell-cmd /var/log "wc -l %1" ".*\.log$" -s +1M -m -7 -u syslog
+```
+
+### 25. Long-Form Options Only
+
+All flags work with `--long` form for readability in scripts:
+
+```bash
+shell-cmd --verbose --size +5K --type f --depth 2 ./src "wc -l %1" ".*\.(cpp|hpp)$"
+```
+
+---
+
+## New in v1.2
+
+### 26. Exclude Patterns
+
+Skip `node_modules` and `.git` directories when counting TypeScript lines:
+
+```bash
+shell-cmd -x "node_modules|\.git" . "wc -l %1" ".*\.ts$"
+```
+
+### 27. Basename & Extension Placeholders
+
+Convert WAV audio files to MP3, using `%b` to name the output file without the original extension:
+
+```bash
+shell-cmd ~/music "ffmpeg -i %1 /tmp/mp3/%b.mp3" ".*\.wav$"
+```
+
+Extract extensions to organize files by type:
+
+```bash
+shell-cmd -n . "mkdir -p /tmp/by-ext/%e && cp %1 /tmp/by-ext/%e/%0" ".*"
+```
+
+### 28. Parallel Execution
+
+Resize images using 4 parallel jobs:
+
+```bash
+shell-cmd -j 4 ./images "convert %1 -resize 800x600 /tmp/thumbs/%0" ".*\.jpg$"
+```
+
+### 29. Confirm Mode
+
+Interactively confirm before each destructive action:
+
+```bash
+shell-cmd -c /tmp "rm %1" ".*\.bak$"
+```
+
+Output:
+
+```
+Execute: rm /tmp/old.bak ? [y/N]
+```
+
+### 30. Stop on Error
+
+Compile all C files and stop at the first failure:
+
+```bash
+shell-cmd -e ./src "gcc -c %1 -o /tmp/%b.o" ".*\.c$"
+```
+
+If any `gcc` invocation returns non-zero, processing halts immediately.
+
+### 31. Summary Statistics
+
+A summary line is automatically printed to stderr after execution when verbose, dry-run, or any command has failed:
+
+```bash
+shell-cmd -v . "wc -l %1" ".*\.py$"
+```
+
+Output at end:
+
+```
+Summary: 12 matched, 12 run, 0 failed
+```
 ---
 
 ## Placeholder Quick Reference
@@ -313,6 +471,8 @@ The program validates that every extra argument has a corresponding placeholder 
 |-------------|-------|
 | `%0` | Filename only (e.g., `report.txt`) |
 | `%1` | Full path (e.g., `/home/user/docs/report.txt`) |
+| `%b` | Basename without extension (e.g., `report`) |
+| `%e` | File extension with dot (e.g., `.txt`) |
 | `%2` | First extra argument after the regex |
 | `%3` | Second extra argument after the regex |
 | `%N` | Nth extra argument (no upper limit) |
@@ -331,7 +491,12 @@ If you're familiar with `find . -exec`, here's how `shell-cmd` compares:
 | **Pattern matching** | ECMAScript regex on the full path | Glob (`-name`) or implementation-varying `-regex` |
 | **Dry-run** | Built-in `-n` flag | No native support |
 | **Verbose mode** | Built-in `-v` flag | No native support |
-| **Filtering by metadata** | Not supported | Size, time, permissions, ownership, type, boolean logic |
+| **Filtering by metadata** | Size (`-s`/`--size`), time (`-m`/`--mtime`), permissions (`-p`/`--perm`), owner (`-u`/`--user`), group (`-g`/`--group`), type (`-t`/`--type`) | Size, time, permissions, ownership, type, boolean logic |
+| **Exclude patterns** | Built-in `-x` / `--exclude` with regex | Requires negation logic or `! -name` |
+| **Parallel execution** | Built-in `-j N` / `--jobs N` | Requires `xargs -P` or GNU `parallel` |
+| **Confirm mode** | Built-in `-c` / `--confirm` | Requires `-ok` (not universally supported) |
+| **Stop on error** | Built-in `-e` / `--stop-on-error` | No native support |
+| **Summary statistics** | Automatic (matched/run/failed counts) | No native support |
 | **Portability** | Requires C++20 build | POSIX-standard, available everywhere |
 
 ### Side-by-Side Examples
@@ -368,8 +533,8 @@ DEST=/mnt/backup/music find ~/Music -regex '.*\.mp3$' -exec sh -c 'cp "$1" "$DES
 
 ### When to Use Which
 
-- **Use `shell-cmd`** when your command needs the filename separated from the path, when you want to inject extra arguments, or when you want built-in dry-run/verbose modes.
-- **Use `find`** when you need to filter by file size, modification time, permissions, ownership, or other metadata — or when you're on a system where you can't compile C++20 code.
+- **Use `shell-cmd`** when your command needs the filename separated from the path, when you want to inject extra arguments, or when you want built-in dry-run/verbose, parallel execution, confirm mode, exclude patterns, stop-on-error, and summary statistics.
+- **Use `find`** when you need boolean logic combining filters (`-and`, `-or`, `-not`) — or when you’re on a system where you can’t compile C++20 code.
 
 ---
 
@@ -387,6 +552,16 @@ DEST=/mnt/backup/music find ~/Music -regex '.*\.mp3$' -exec sh -c 'cp "$1" "$DES
 
 6. **Depth control is useful for large trees.** If you only want files in `src/` and its immediate children, use `-d 1`.
 
+7. **Use metadata filters to narrow results.** Combine `-s`, `-m`, `-p`, `-u`, `-g`, and `-t` to precisely target files without grepping through everything.
+
+8. **Use long-form flags in scripts.** `--dry-run --size +10M --type f` is more readable than `-n -s +10M -t f` when writing reusable shell scripts.
+
+9. **Use `-x` to skip noisy directories.** `-x "node_modules|\.git|build"` saves time and avoids false matches.
+
+10. **Use `-j` for CPU-bound batch work.** Parallel execution shines for tasks like image conversion or compilation where each command is independent.
+
+11. **Use `-c` for irreversible operations.** Confirm mode gives you a per-file safety net when `rm`-ing or `mv`-ing.
+
 ---
 
 ## Error Handling
@@ -396,7 +571,8 @@ DEST=/mnt/backup/music find ~/Music -regex '.*\.mp3$' -exec sh -c 'cp "$1" "$DES
 | Fewer than 3 positional arguments | Prints error + help text, exits |
 | Directory can't be opened | Prints error with path, exits |
 | Extra argument has no matching placeholder | Prints error naming the missing `%N`, exits |
-| Command fails (non-zero exit) | The next file is still processed (no abort-on-error) |
+| Command fails (non-zero exit) | Next file is processed unless `-e` / `--stop-on-error` is set |
+| Stop-on-error triggered | Processing halts, summary prints, exits with `EXIT_FAILURE` |
 | Invalid regex | `std::regex` throws an exception, program crashes with an unhandled exception |
 
 ---

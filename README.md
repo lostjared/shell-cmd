@@ -31,16 +31,28 @@ shell-cmd [options] path "command %1 [%2 %3..]" regex [extra_args..]
 | `%0` | Filename only (no path) |
 | `%1` | Full path to matched file |
 | `%2+` | Extra arguments from command line |
+| `%b` | Basename without extension (e.g., `report` from `report.txt`) |
+| `%e` | File extension including dot (e.g., `.txt`) |
 
 ### Options
 
-| Flag | Description |
-|------|-------------|
-| `-n` | Dry-run — print commands without executing |
-| `-v` | Verbose — print each command before running |
-| `-a` | Include hidden files and directories |
-| `-d depth` | Max recursion depth (0 = current directory only) |
-| `-h` | Show help |
+| Short | Long | Description |
+|-------|------|-------------|
+| `-n` | `--dry-run` | Dry-run — print commands without executing |
+| `-v` | `--verbose` | Verbose — print each command before running |
+| `-a` | `--all` | Include hidden files and directories |
+| `-d N` | `--depth N` | Max recursion depth (0 = current directory only) |
+| `-s SIZE` | `--size SIZE` | Filter by size: `+10M` (>10 MB), `-1K` (<1 KB), `4096` (exact). Suffixes: K, M, G |
+| `-m DAYS` | `--mtime DAYS` | Filter by modification time: `+7` (older than 7 days), `-1` (within last day) |
+| `-p MODE` | `--perm MODE` | Filter by permissions (octal), e.g. `755` |
+| `-u USER` | `--user USER` | Filter by owner username |
+| `-g GROUP` | `--group GROUP` | Filter by group name |
+| `-t TYPE` | `--type TYPE` | Filter by type: `f` (file), `d` (directory), `l` (symlink) |
+| `-x REGEX` | `--exclude REGEX` | Exclude files/directories matching REGEX |
+| `-e` | `--stop-on-error` | Stop on first command failure |
+| `-c` | `--confirm` | Prompt for confirmation before each command |
+| `-j N` | `--jobs N` | Run N commands in parallel (default: 1) |
+| `-h` | `--help` | Show help |
 
 ## Examples
 
@@ -86,6 +98,72 @@ Extract all `.7z` archives:
 shell-cmd . "7z e %1" ".*\.7z$"
 ```
 
+Find large files (over 10 MB):
+
+```bash
+shell-cmd . "ls -lh %1" ".*" --size +10M
+```
+
+Delete files older than 30 days, with dry-run:
+
+```bash
+shell-cmd --dry-run /tmp "rm %1" ".*\.tmp$" --mtime +30
+```
+
+Find executable files (permission 755):
+
+```bash
+shell-cmd . "echo %1" ".*" --perm 755 --type f
+```
+
+List files owned by root:
+
+```bash
+shell-cmd /etc "echo %1" ".*\.conf$" --user root
+```
+
+List only directories matching a pattern:
+
+```bash
+shell-cmd . "echo %1" ".*src.*" --type d
+```
+
+Combine filters — large `.log` files modified recently:
+
+```bash
+shell-cmd /var/log "wc -l %1" ".*\.log$" -s +1M -m -7
+```
+
+Exclude `node_modules` and `.git` directories:
+
+```bash
+shell-cmd -x "node_modules|\.git" . "wc -l %1" ".*\.ts$"
+```
+
+Convert WAV to MP3, using `%b` for the output filename without extension:
+
+```bash
+shell-cmd ~/music "ffmpeg -i %1 /tmp/mp3/%b.mp3" ".*\.wav$"
+```
+
+Run commands in parallel with 4 jobs:
+
+```bash
+shell-cmd -j 4 ./images "convert %1 -resize 800x600 /tmp/thumbs/%0" ".*\.jpg$"
+```
+
+Confirm before each destructive command:
+
+```bash
+shell-cmd -c /tmp "rm %1" ".*\.bak$"
+```
+
+Stop on first error:
+
+```bash
+shell-cmd -e ./src "gcc -c %1 -o /tmp/%b.o" ".*\.c$"
+```
+
 ## How It Works
 
 The program recursively walks the specified directory using `std::filesystem`. For each file whose path matches the given regex, it substitutes placeholders in the command template and executes it via `/bin/sh`. Hidden files and directories are skipped by default.
@@ -100,7 +178,12 @@ The program recursively walks the specified directory using `std::filesystem`. F
 | **Pattern matching** | ECMAScript regex on the full path | Glob (`-name`) or implementation-varying `-regex` |
 | **Dry-run** | Built-in `-n` flag | No native support |
 | **Verbose mode** | Built-in `-v` flag | No native support |
-| **Filtering by metadata** | Not supported | Size, time, permissions, ownership, type, boolean logic |
+| **Filter by metadata** | Size (`-s`), time (`-m`), permissions (`-p`), owner (`-u`), group (`-g`), type (`-t`) | Size, time, permissions, ownership, type, boolean logic |
+| **Exclude patterns** | Built-in `-x` with regex | Requires negation logic or `! -name` |
+| **Parallel execution** | Built-in `-j N` | Requires `xargs -P` or GNU `parallel` |
+| **Confirm mode** | Built-in `-c` flag | Requires `-ok` (not universally supported) |
+| **Stop on error** | Built-in `-e` flag | No native support |
+| **Summary stats** | Automatic (matched/run/failed counts) | No native support |
 | **Portability** | Requires C++20 build | POSIX-standard, available everywhere |
 
 Side-by-side example — copy all `.txt` files to a backup directory, preserving filenames:
@@ -113,7 +196,7 @@ shell-cmd . "cp %1 /tmp/backup/%0" ".*\.txt$"
 find . -regex '.*\.txt$' -exec sh -c 'cp "$1" "/tmp/backup/$(basename "$1")"' _ {} \;
 ```
 
-In short, `shell-cmd` trades `find`'s metadata filtering power for a more ergonomic command-templating experience, especially when you need the filename separate from the path or want to inject extra arguments.
+In short, `shell-cmd` trades `find`'s boolean filter combinators for a more ergonomic command-templating experience with built-in dry-run, parallel execution, confirm mode, stop-on-error, exclude patterns, and summary statistics.
 
 ## License
 
