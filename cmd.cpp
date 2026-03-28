@@ -679,29 +679,31 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    const auto &path = positional[0];
-    const auto &input = positional[1];
-    const auto &regex_str = positional[2];
-
-    size_t index = 2;
-    std::vector<std::string> args{"filename"};
-    for (size_t i = 3; i < positional.size(); ++i) {
-        if (input.find(std::format("%{}", index)) == std::string::npos) {
-            std::cerr << std::format("Error: command has no placeholder %{} for extra argument \"{}\"\n", index, positional[i]);
-            return EXIT_FAILURE;
+    try {
+        const auto &path = positional[0];
+        const auto &input = positional[1];
+        const auto &regex_str = positional[2];
+        size_t index = 2;
+        std::vector<std::string> args{"filename"};
+        for (size_t i = 3; i < positional.size(); ++i) {
+            if (input.find(std::format("%{}", index)) == std::string::npos) {
+                std::cerr << std::format("Error: command has no placeholder %{} for extra argument \"{}\"\n", index, positional[i]);
+                return EXIT_FAILURE;
+            }
+            args.push_back(positional[i]);
+            ++index;
         }
-        args.push_back(positional[i]);
-        ++index;
-    }
+        add_directory(path, input, regex_str, args, 0);
+        if (opts.jobs > 1)
+            wait_all();
 
-    add_directory(path, input, regex_str, args, 0);
-
-    if (opts.jobs > 1)
-        wait_all();
-
-    if (opts.verbose || opts.dry_run || stats.commands_failed > 0) {
-        std::cerr << std::format("\nSummary: {} matched, {} run, {} failed\n",
-                                 stats.files_matched, stats.commands_run, stats.commands_failed);
+        if (opts.verbose || opts.dry_run || stats.commands_failed > 0) {
+            std::cerr << std::format("\nSummary: {} matched, {} run, {} failed\n",
+                                    stats.files_matched, stats.commands_run, stats.commands_failed);
+        }
+    } catch(const std::exception &e) {
+        std::cerr << "Exception: " << e.what() << "\n";
+        return EXIT_FAILURE;
     }
 
     return stats.commands_failed > 0 ? EXIT_FAILURE : 0;
