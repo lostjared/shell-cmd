@@ -374,7 +374,12 @@ int System(const std::string &command) {
     sa_ignore.sa_handler = SIG_IGN;
     sa_ignore.sa_flags = 0;
     sigemptyset(&sa_ignore.sa_mask);
-    sigaction(SIGINT, &sa_ignore, &sa_origint);
+    // Use our sigint_handler instead of SIG_IGN so Ctrl+C is recorded
+    struct sigaction sa_int;
+    sa_int.sa_handler = sigint_handler;
+    sa_int.sa_flags = 0;
+    sigemptyset(&sa_int.sa_mask);
+    sigaction(SIGINT, &sa_int, &sa_origint);
     sigaction(SIGQUIT, &sa_ignore, &sa_oquit);
 
     switch ((id = fork())) {
@@ -406,8 +411,10 @@ int System(const std::string &command) {
     sigprocmask(SIG_SETMASK, &omask, NULL);
     sigaction(SIGINT, &sa_origint, NULL);
     sigaction(SIGQUIT, &sa_oquit, NULL);
-    // If the child was killed by SIGINT, flag the parent to exit cleanly
-    if (WIFSIGNALED(status) && WTERMSIG(status) == SIGINT)
+    // If the child was killed by SIGINT (or the shell caught it and exited 130),
+    // flag the parent to exit cleanly
+    if ((WIFSIGNALED(status) && WTERMSIG(status) == SIGINT) ||
+        (WIFEXITED(status) && WEXITSTATUS(status) == 130))
         interrupted = 1;
     errno = serrno;
     return status;
