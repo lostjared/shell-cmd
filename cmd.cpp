@@ -562,7 +562,7 @@ bool proc_cmd(const std::string &cmd, std::span<const std::string> text, std::st
                 r = replace_string(r, placeholder, std::string{text[i]});
         }
     } 
-    else if(!text.empty()) {
+    else  {
          
             r = replace_string(r, "%0", file_string);
             for(size_t i = 0; i < text.size(); ++i) {
