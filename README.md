@@ -41,6 +41,7 @@ shell-cmd [options] path "command %1 [%2 %3..]" regex [extra_args..]
 | `-z` | `--regex-match` | Use `regex_match` (entire path must match) instead of the default `regex_search` (substring match) |
 | `-b` | `--glob` | Treat the search pattern as a glob (`*`, `?`, `[...]`) instead of regex |
 | `-i` | `--glob-exclude` | Treat the exclude pattern (`-x`) as a glob instead of regex |
+| `-f EXPR` | `--expr EXPR` | Expression filter — compose `glob()`, `regex()`, `regex_match()` with `and`/`or`/`not` (replaces the regex positional argument) |
 | `-n` | `--dry-run` | Dry-run — print commands without executing |
 | `-v` | `--verbose` | Verbose — print each command before running |
 | `-a` | `--all` | Include hidden files and directories |
@@ -167,6 +168,61 @@ shell-cmd --glob -x "build|CMakeFiles|third_party" . "clang-format -i %1" "*.[ch
 
 # Regex search pattern, glob exclude pattern (use -i)
 shell-cmd -x "build*" -i . "echo %1" "\.cpp$"
+```
+
+---
+
+## Expression Filter (`--expr`)
+
+The `-f` / `--expr` option lets you compose complex match logic in a single argument, combining `glob()`, `regex()`, and `regex_match()` with boolean operators. When `--expr` is used, the third positional argument (regex) is **not required** — the expression replaces it.
+
+### Grammar
+
+Expressions are built from **functions**, **boolean operators**, and **parentheses**:
+
+| Element | Description |
+|---------|-------------|
+| `glob("pattern")` | Convert the glob to an anchored regex and apply `regex_search` (same as `--glob`) |
+| `regex("pattern")` | Substring regex search (same as default mode) |
+| `regex_search("pattern")` | Alias for `regex()` |
+| `regex_match("pattern")` | Full-path regex match (same as `--regex-match`) |
+| `and` | Both sides must match |
+| `or` | Either side must match |
+| `not` | Negate the following expression |
+| `( … )` | Group sub-expressions to control precedence |
+
+Operator precedence (highest to lowest): `not`, `and`, `or`. Use parentheses to override.
+
+### Examples
+
+Match C++ files, exclude build directories:
+
+```bash
+shell-cmd . "echo %1" --expr '(glob("*.cpp") or glob("*.hpp")) and not regex("build|CMakeFiles")'
+```
+
+Single function — equivalent to a regex positional argument:
+
+```bash
+shell-cmd . "wc -l %1" --expr 'regex("\.py$")'
+```
+
+Nested boolean logic — Python or Rust sources, excluding tests and vendor:
+
+```bash
+shell-cmd . "echo %1" --expr '(glob("*.py") or glob("*.rs")) and not glob("*test*") and not regex("vendor")'
+```
+
+Full-path matching inside an expression:
+
+```bash
+shell-cmd . "echo %1" --expr 'regex_match("\\./src/.*\\.cpp")'
+```
+
+Combine `--expr` with other options (`-x`, `--size`, `--type`):
+
+```bash
+shell-cmd -x "node_modules" --size +1K --type f . "wc -l %1" --expr 'glob("*.ts") or glob("*.tsx")'
 ```
 
 ---
@@ -354,8 +410,9 @@ When using `-l` / `--list-all`, `shell-cmd` does not run a command per file; it 
 | **Filename placeholder** | `%0` gives the filename without the path | No equivalent — requires `sh -c` + `basename` |
 | **Full path placeholder** | `%1` | `{}` |
 | **Extra arguments** | `%2`, `%3`, … with validation | Not supported — use shell variables |
-| **Pattern matching** | ECMAScript regex (substring or full-path), glob mode | Glob (`-name`) or implementation-varying `-regex` |
+| **Pattern matching** | ECMAScript regex (substring or full-path), glob mode (`-b`), or composable expressions (`--expr`) | Glob (`-name`) or implementation-varying `-regex` |
 | **Exclude patterns** | Built-in `-x` with regex or glob (`-i`) | Requires negation logic or `! -name` |
+| **Expression filters** | Built-in `--expr` — combine `glob()`, `regex()`, `regex_match()` with `and`/`or`/`not` | Boolean `-and`/`-or`/`-not` between find predicates |
 | **Dry-run** | Built-in `-n` flag | No native support |
 | **Verbose mode** | Built-in `-v` flag | No native support |
 | **Filter by metadata** | Size (`-s`), time (`-m`), permissions (`-p`), owner (`-u`), group (`-g`), type (`-t`) | Size, time, permissions, ownership, type, boolean logic |
@@ -375,7 +432,7 @@ shell-cmd . "cp %1 /tmp/backup/%0" "\.txt$"
 find . -regex '.*\.txt$' -exec sh -c 'cp "$1" "/tmp/backup/$(basename "$1")"' _ {} \;
 ```
 
-In short, `shell-cmd` trades `find`'s boolean filter combinators for a more ergonomic command-templating experience with built-in dry-run, parallel execution, confirm mode, stop-on-error, exclude patterns (regex or glob), and summary statistics.
+In short, `shell-cmd` offers a more ergonomic command-templating experience with built-in dry-run, parallel execution, confirm mode, stop-on-error, exclude patterns (regex or glob), composable expression filters (`--expr` with `and`/`or`/`not`), and summary statistics.
 
 ## License
 

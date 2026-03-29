@@ -1,12 +1,14 @@
 /**
  * @file cmd.cpp
- * @brief shell-cmd v1.2 — Recursively find files matching a regex and execute a shell command for each match.
+ * @brief shell-cmd v1.3 — Recursively find files matching a regex and execute a shell command for each match.
  * @details Walks a directory tree using std::filesystem, applies metadata filters (size, time,
  *          permissions, ownership, type), substitutes placeholders in a command template, and
  *          executes the resulting command for every matched entry. Supports parallel execution,
  *          exclude patterns (regex or glob via @c -i / @c --glob-exclude), confirm mode,
- *          stop-on-error, and list-all mode (@c -l / @c --list-all) which collects all matched
- *          paths and runs the command once with @c %%0 expanded to the full list.
+ *          stop-on-error, list-all mode (@c -l / @c --list-all) which collects all matched
+ *          paths and runs the command once with @c %%0 expanded to the full list, and expression
+ *          filters (@c -f / @c --expr) which allow combining @c glob(), @c regex(), and
+ *          @c regex_match() predicates with boolean operators @c and, @c or, and @c not.
  * @see https://lostsidedead.biz
  * @license GNU GPL v3
  */
@@ -102,6 +104,7 @@ struct Options {
     RegExMode mode = RegExMode::REGEX_SEARCH; ///< RegEx mode
     bool glob = false;               ///< If true, treat search pattern as a glob instead of regex.
     bool glob_exclude = false;       ///< If true (via -i/--glob-exclude), treat exclude pattern as a glob instead of regex.
+    std::string expr_str;            ///< Expression filter string from --expr.
 };
 
 static Options opts; ///< Global runtime options.
@@ -212,6 +215,208 @@ std::string glob_to_regex(const std::string &glob) {
 
     result += '$';
     return result;
+}
+
+// --- Expression filter (--expr) ------------------------------------------------
+
+/// @brief Node types for the expression filter AST.
+enum class ExprType { GLOB, REGEX_SEARCH, REGEX_MATCH, AND, OR, NOT };
+
+/// @brief AST node for expression-based file matching.
+struct ExprNode {
+    ExprType type;
+    std::regex compiled;               ///< Pre-compiled regex (leaf nodes only).
+    std::unique_ptr<ExprNode> left;    ///< Left child (AND/OR) or sole child (NOT).
+    std::unique_ptr<ExprNode> right;   ///< Right child (AND/OR only).
+
+    /// @brief Evaluate this expression node against a file path.
+    bool evaluate(const std::string &path) const {
+        switch (type) {
+        case ExprType::GLOB:
+            return std::regex_search(path, compiled);
+        case ExprType::REGEX_SEARCH:
+            return std::regex_search(path, compiled);
+        case ExprType::REGEX_MATCH:
+            return std::regex_match(path, compiled);
+        case ExprType::AND:
+            return left->evaluate(path) && right->evaluate(path);
+        case ExprType::OR:
+            return left->evaluate(path) || right->evaluate(path);
+        case ExprType::NOT:
+            return !left->evaluate(path);
+        }
+        return false;
+    }
+};
+
+/// @brief Token produced by the expression tokenizer.
+struct ExprToken {
+    enum Type { IDENT, STRING, LPAREN, RPAREN, END } type;
+    std::string value;
+};
+
+/// @brief Tokenizer for expression filter strings.
+class ExprTokenizer {
+    const std::string &src;
+    size_t pos = 0;
+    void skip_ws() {
+        while (pos < src.size() && std::isspace(static_cast<unsigned char>(src[pos])))
+            ++pos;
+    }
+public:
+    explicit ExprTokenizer(const std::string &s) : src(s) {}
+    ExprToken next() {
+        skip_ws();
+        if (pos >= src.size())
+            return {ExprToken::END, ""};
+        char c = src[pos];
+        if (c == '(') { ++pos; return {ExprToken::LPAREN, "("}; }
+        if (c == ')') { ++pos; return {ExprToken::RPAREN, ")"}; }
+        if (c == '"' || c == '\'') {
+            char q = c;
+            ++pos;
+            std::string val;
+            while (pos < src.size() && src[pos] != q) {
+                if (src[pos] == '\\' && pos + 1 < src.size()) {
+                    ++pos;
+                    val += src[pos];
+                } else {
+                    val += src[pos];
+                }
+                ++pos;
+            }
+            if (pos < src.size())
+                ++pos;
+            return {ExprToken::STRING, val};
+        }
+        if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
+            std::string val;
+            while (pos < src.size() &&
+                   (std::isalnum(static_cast<unsigned char>(src[pos])) || src[pos] == '_'))
+                val += src[pos++];
+            return {ExprToken::IDENT, val};
+        }
+        throw std::runtime_error(
+            std::format("unexpected character '{}' in expression at position {}", c, pos));
+    }
+};
+
+/// @brief Recursive-descent parser for expression filter strings.
+///
+/// Grammar:
+///   expr     := or_expr
+///   or_expr  := and_expr ("or" and_expr)*
+///   and_expr := not_expr ("and" not_expr)*
+///   not_expr := "not" not_expr | primary
+///   primary  := function "(" STRING ")" | "(" expr ")"
+///   function := "glob" | "regex" | "regex_search" | "regex_match"
+class ExprParser {
+    ExprTokenizer tok;
+    ExprToken cur;
+    void advance() { cur = tok.next(); }
+    void expect(ExprToken::Type t, const std::string &desc) {
+        if (cur.type != t)
+            throw std::runtime_error(std::format(
+                "expected {} in expression, got '{}'", desc,
+                cur.value.empty() ? "end" : cur.value));
+        advance();
+    }
+    std::unique_ptr<ExprNode> parse_primary() {
+        if (cur.type == ExprToken::LPAREN) {
+            advance();
+            auto node = parse_or();
+            expect(ExprToken::RPAREN, "')'");
+            return node;
+        }
+        if (cur.type != ExprToken::IDENT)
+            throw std::runtime_error(std::format(
+                "unexpected token '{}' in expression",
+                cur.value.empty() ? "end" : cur.value));
+        std::string name = cur.value;
+        ExprType ft;
+        if (name == "glob")
+            ft = ExprType::GLOB;
+        else if (name == "regex" || name == "regex_search")
+            ft = ExprType::REGEX_SEARCH;
+        else if (name == "regex_match")
+            ft = ExprType::REGEX_MATCH;
+        else
+            throw std::runtime_error(
+                std::format("unknown function '{}' in expression", name));
+        advance();
+        expect(ExprToken::LPAREN, "'(' after function name");
+        if (cur.type != ExprToken::STRING)
+            throw std::runtime_error(
+                "expected quoted string as function argument");
+        std::string pattern = cur.value;
+        advance();
+        expect(ExprToken::RPAREN, "')'");
+        auto node = std::make_unique<ExprNode>();
+        node->type = ft;
+        node->compiled = std::regex(
+            ft == ExprType::GLOB ? glob_to_regex(pattern) : pattern,
+            std::regex::ECMAScript);
+        return node;
+    }
+    std::unique_ptr<ExprNode> parse_not() {
+        if (cur.type == ExprToken::IDENT && cur.value == "not") {
+            advance();
+            auto child = parse_not();
+            auto node = std::make_unique<ExprNode>();
+            node->type = ExprType::NOT;
+            node->left = std::move(child);
+            return node;
+        }
+        return parse_primary();
+    }
+    std::unique_ptr<ExprNode> parse_and() {
+        auto left = parse_not();
+        while (cur.type == ExprToken::IDENT && cur.value == "and") {
+            advance();
+            auto right = parse_not();
+            auto node = std::make_unique<ExprNode>();
+            node->type = ExprType::AND;
+            node->left = std::move(left);
+            node->right = std::move(right);
+            left = std::move(node);
+        }
+        return left;
+    }
+    std::unique_ptr<ExprNode> parse_or() {
+        auto left = parse_and();
+        while (cur.type == ExprToken::IDENT && cur.value == "or") {
+            advance();
+            auto right = parse_and();
+            auto node = std::make_unique<ExprNode>();
+            node->type = ExprType::OR;
+            node->left = std::move(left);
+            node->right = std::move(right);
+            left = std::move(node);
+        }
+        return left;
+    }
+public:
+    explicit ExprParser(const std::string &s) : tok(s) {}
+    std::unique_ptr<ExprNode> parse() {
+        advance();
+        auto root = parse_or();
+        if (cur.type != ExprToken::END)
+            throw std::runtime_error(
+                "unexpected content after expression");
+        return root;
+    }
+};
+
+static std::unique_ptr<ExprNode> expr_root; ///< Parsed expression tree (set when --expr is used).
+
+/// @brief Check whether a path matches the active search pattern or expression.
+static bool entry_matches_path(const std::string &fullpath, const std::string &regex_str) {
+    if (expr_root)
+        return expr_root->evaluate(fullpath);
+    std::regex ex(regex_str, std::regex::ECMAScript);
+    if (opts.mode == RegExMode::REGEX_SEARCH)
+        return std::regex_search(fullpath, ex);
+    return std::regex_match(fullpath, ex);
 }
 
 /**
@@ -443,54 +648,25 @@ void fill_list(const fs::path &path, const std::string &cmd, const std::string &
         }
 
         if (entry.is_directory(ec)) {
-            // If type filter is 'd', also match directories against regex
             if (opts.type_filter == 'd') {
-                std::regex ex(regex_str);
                 auto fullpath = entry.path().string();
-                if(opts.mode == RegExMode::REGEX_SEARCH) {
-                    if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                        stats.files_matched++;
-                        return;
-                    }
-                } else if(opts.mode == RegExMode::REGEX_MATCH) {
-                    if (std::regex_match(fullpath, ex) && matches_filters(entry)) {
-                        stats.files_matched++;
-                        return;
-                    }
+                if (entry_matches_path(fullpath, regex_str) && matches_filters(entry)) {
+                    stats.files_matched++;
+                    return;
                 }
             }
             fill_list(entry.path(), cmd, regex_str, args, files, depth + 1);
         } else if (entry.is_symlink(ec) && opts.type_filter == 'l') {
-            std::regex ex(regex_str);
             auto fullpath = entry.path().string();
-            if(opts.mode == RegExMode::REGEX_SEARCH) {
-                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                    stats.files_matched++;
-                    files.push_back(fullpath);
-                    continue;
-                }
-            } else if(opts.mode == RegExMode::REGEX_MATCH) {
-                if (std::regex_match(fullpath, ex) && matches_filters(entry)) {
-                    stats.files_matched++;
-                    files.push_back(fullpath);
-                    continue;
-                }
+            if (entry_matches_path(fullpath, regex_str) && matches_filters(entry)) {
+                stats.files_matched++;
+                files.push_back(fullpath);
             }
         } else if (entry.is_regular_file(ec) || (entry.is_symlink(ec) && opts.type_filter == 0)) {
-            std::regex ex(regex_str);
             auto fullpath = entry.path().string();
-            if(opts.mode == RegExMode::REGEX_SEARCH) {
-                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                    stats.files_matched++;
-                    files.push_back(fullpath);
-                    continue;
-                }
-            } else if(opts.mode == RegExMode::REGEX_MATCH) {
-                if (std::regex_match(fullpath, ex) && matches_filters(entry)) {
-                    stats.files_matched++;
-                    files.push_back(fullpath);
-                    continue;
-                }
+            if (entry_matches_path(fullpath, regex_str) && matches_filters(entry)) {
+                stats.files_matched++;
+                files.push_back(fullpath);
             }
         }
     }
@@ -537,63 +713,31 @@ void add_directory(const fs::path &path, const std::string &cmd, const std::stri
         }
 
         if (entry.is_directory(ec)) {
-            // If type filter is 'd', also match directories against regex
             if (opts.type_filter == 'd') {
-                std::regex ex(regex_str);
                 auto fullpath = entry.path().string();
-                if(opts.mode == RegExMode::REGEX_SEARCH) {
-                    if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                        stats.files_matched++;
-                        args[0] = fullpath;
-                        if (!proc_cmd(cmd, args))
-                            return;
-                    }
-                } else if(opts.mode == RegExMode::REGEX_MATCH) {
-                    if (std::regex_match(fullpath, ex) && matches_filters(entry)) {
-                        stats.files_matched++;
-                        args[0] = fullpath;
-                        if (!proc_cmd(cmd, args))
-                            return;
-                    }
+                if (entry_matches_path(fullpath, regex_str) && matches_filters(entry)) {
+                    stats.files_matched++;
+                    args[0] = fullpath;
+                    if (!proc_cmd(cmd, args))
+                        return;
                 }
             }
             add_directory(entry.path(), cmd, regex_str, args, depth + 1);
         } else if (entry.is_symlink(ec) && opts.type_filter == 'l') {
-            std::regex ex(regex_str);
             auto fullpath = entry.path().string();
-            if(opts.mode == RegExMode::REGEX_SEARCH) {
-                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                    stats.files_matched++;
-                    args[0] = fullpath;
-                    if (!proc_cmd(cmd, args))
-                        return;
-                }
-            } else if(opts.mode == RegExMode::REGEX_MATCH) {
-                if (std::regex_match(fullpath, ex) && matches_filters(entry)) {
-                    stats.files_matched++;
-                    args[0] = fullpath;
-                    if (!proc_cmd(cmd, args))
-                        return;
-                }
-
+            if (entry_matches_path(fullpath, regex_str) && matches_filters(entry)) {
+                stats.files_matched++;
+                args[0] = fullpath;
+                if (!proc_cmd(cmd, args))
+                    return;
             }
         } else if (entry.is_regular_file(ec) || (entry.is_symlink(ec) && opts.type_filter == 0)) {
-            std::regex ex(regex_str);
             auto fullpath = entry.path().string();
-            if(opts.mode == RegExMode::REGEX_SEARCH) {
-                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                    stats.files_matched++;
-                    args[0] = fullpath;
-                    if (!proc_cmd(cmd, args))
-                        return;
-                }
-            } else if(opts.mode == RegExMode::REGEX_MATCH) {
-                if (std::regex_match(fullpath, ex) && matches_filters(entry)) {
-                    stats.files_matched++;
-                    args[0] = fullpath;
-                    if (!proc_cmd(cmd, args))
-                        return;
-                }
+            if (entry_matches_path(fullpath, regex_str) && matches_filters(entry)) {
+                stats.files_matched++;
+                args[0] = fullpath;
+                if (!proc_cmd(cmd, args))
+                    return;
             }
         }
     }
@@ -860,6 +1004,8 @@ void print_help(const char *prog) {
         << "  " << g << "-t, --type TYPE" << r << "     filter by type: f (file), d (directory), l (symlink)\n"
         << "  " << g << "-x, --exclude REGEX" << r << " exclude files/directories matching REGEX\n"
         << "  " << g << "-i, --glob-exclude" << r << "  treat exclude pattern as a glob instead of regex\n"
+        << "  " << g << "-f, --expr EXPR" << r << "     filter expression: glob(), regex(), regex_match(),\n"
+        << "                      combined with and/or/not and parentheses\n"
         << "  " << g << "-e, --stop-on-error" << r << " stop on first command failure\n"
         << "  " << g << "-c, --confirm" << r << "       prompt for confirmation before each command\n"
         << "  " << g << "-j, --jobs N" << r << "        run N commands in parallel (default: 1)\n"
@@ -924,6 +1070,8 @@ int main(int argc, char **argv) {
         .addOptionDouble('B', "glob", "glob mode")
         .addOptionSingle('i', "glob exclude mode")
         .addOptionDouble('I', "glob-exclude", "glob exclude mode")
+        .addOptionSingleValue('f', "filter expression")
+        .addOptionDoubleValue('F', "expr", "filter expression")
         .addOptionDouble('H', "help", "show help");
 
     std::vector<std::string> positional;
@@ -1023,6 +1171,10 @@ int main(int argc, char **argv) {
             case 'I':
                 opts.glob_exclude = true;
                 break;
+            case 'f':
+            case 'F':
+                opts.expr_str = arg.arg_value;
+                break;
             case '-':
                 positional.push_back(arg.arg_value);
                 break;
@@ -1033,8 +1185,11 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    if (positional.size() < 3) {
-        print_error("at least three positional arguments required.");
+    size_t min_pos = opts.expr_str.empty() ? 3 : 2;
+    if (positional.size() < min_pos) {
+        print_error(opts.expr_str.empty()
+            ? "at least three positional arguments required (or use --expr)."
+            : "at least two positional arguments required with --expr.");
         print_help(argv[0]);
         return EXIT_FAILURE;
     }
@@ -1042,14 +1197,20 @@ int main(int argc, char **argv) {
     try {
         const auto &path = positional[0];
         const auto &input = positional[1];
-        const std::string regex_str = opts.glob ? glob_to_regex(positional[2]) : positional[2];
+        std::string regex_str;
+        if (!opts.expr_str.empty()) {
+            expr_root = ExprParser(opts.expr_str).parse();
+        } else {
+            regex_str = opts.glob ? glob_to_regex(positional[2]) : positional[2];
+        }
         if (opts.glob_exclude && !opts.exclude_pattern.empty())
             opts.exclude_pattern = glob_to_regex(opts.exclude_pattern);
         size_t index = (opts.collect_all) ? 1 : 2;
         std::vector<std::string> args;
         if (!opts.collect_all)
             args.push_back("filename");
-        for (size_t i = 3; i < positional.size(); ++i) {
+        size_t extra_start = opts.expr_str.empty() ? 3 : 2;
+        for (size_t i = extra_start; i < positional.size(); ++i) {
             if (input.find(std::format("%{}", index)) == std::string::npos) {
                 print_error(std::format("command has no placeholder %{} for extra argument \"{}\"", index, positional[i]));
                 return EXIT_FAILURE;

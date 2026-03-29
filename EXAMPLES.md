@@ -173,6 +173,36 @@ shell-cmd --glob -x "*.o" . "echo %1" "*.c"
 
 ---
 
+## Expression Filter
+
+Use `--expr` / `-f` to combine `glob()`, `regex()`, and `regex_match()` with `and`, `or`, `not`, and parentheses. When `--expr` is used, the regex positional argument is not required.
+
+Match C++ source and header files, excluding build directories:
+
+```bash
+shell-cmd . "echo %1" --expr '(glob("*.cpp") or glob("*.hpp")) and not regex("build|CMakeFiles")'
+```
+
+Single function — equivalent to passing a regex argument:
+
+```bash
+shell-cmd . "wc -l %1" --expr 'regex("\.py$")'
+```
+
+Nested boolean logic — Python or Rust sources, excluding tests and vendor:
+
+```bash
+shell-cmd . "echo %1" --expr '(glob("*.py") or glob("*.rs")) and not glob("*test*") and not regex("vendor")'
+```
+
+Combine `--expr` with other flags:
+
+```bash
+shell-cmd -x "node_modules" --size +1K --type f . "wc -l %1" --expr 'glob("*.ts") or glob("*.tsx")'
+```
+
+---
+
 ## Combine Options
 
 Preview (`-n`), include hidden files (`-a`), and limit depth to 2 levels (`-d 2`):
@@ -194,6 +224,8 @@ shell-cmd -n -a -d 2 ~ "wc -l %1" ".*\.bashrc|.*\.zshrc"
 | Flag | Effect |
 |------|--------|
 | `-b` | Glob mode — treat pattern as glob (`*`, `?`) instead of regex |
+| `-i` | Glob exclude — treat exclude pattern as glob instead of regex |
+| `-f EXPR` | Expression filter — compose `glob()`, `regex()`, `regex_match()` with `and`/`or`/`not` |
 | `-n` | Dry-run — print without executing |
 | `-v` | Verbose — print before executing |
 | `-a` | Include hidden files/directories |

@@ -30,10 +30,10 @@
 |----------|---------|
 | 1st | **Path** — the root directory to search |
 | 2nd | **Command template** — shell command with `%` placeholders |
-| 3rd | **Regex** — ECMAScript regex matched against the full file path |
+| 3rd | **Regex** — ECMAScript regex matched against the full file path (optional when `--expr` is used) |
 | 4th+ | **Extra arguments** — substituted into `%2`, `%3`, etc. |
 
-If fewer than three positional arguments are given, the program prints an error and the help text.
+If fewer than three positional arguments are given (and `--expr` is not set), the program prints an error and the help text. When `--expr` is used, the regex argument is not required — only the path and command template are needed.
 
 ### Directory Traversal
 
@@ -44,7 +44,7 @@ The function `add_directory()` walks the directory tree using `std::filesystem::
 - **Permission errors** are handled gracefully; directories that can't be opened produce an error message and exit.
 - **Symlinks** are not explicitly followed — standard `directory_iterator` behavior applies.
 
-For every regular file whose full path matches the regex, the program calls `proc_cmd()`.
+For every regular file whose full path matches the regex (or satisfies the `--expr` expression), the program calls `proc_cmd()`.
 
 In **list-all mode** (`-l` / `--list-all`), a separate function `fill_list()` walks the tree and collects all matching paths into a vector. After the walk completes, the paths are joined with spaces and `proc_cmd()` is called once with `%0` expanded to the full list.
 
@@ -136,6 +136,7 @@ shell-cmd [options] <path> "<command %1 [%2 %3..]>" <regex> [extra_args..]
 | `-t TYPE` | `--type TYPE` | **Type** — `f` (file), `d` (directory), `l` (symlink) |
 | `-x REGEX` | `--exclude REGEX` | **Exclude** — skip files/directories matching the regex |
 | `-i` | `--glob-exclude` | **Glob exclude** — treat the exclude pattern as a glob instead of regex |
+| `-f EXPR` | `--expr EXPR` | **Expression filter** — compose `glob()`, `regex()`, `regex_match()` with `and`/`or`/`not` (replaces the regex positional argument) |
 | `-e` | `--stop-on-error` | **Stop on error** — halt on first command failure |
 | `-c` | `--confirm` | **Confirm** — prompt yes/no before each command |
 | `-j N` | `--jobs N` | **Parallel** — run N commands concurrently (default: 1) |
@@ -508,6 +509,60 @@ Output at end:
 ```
 Summary: 12 matched, 12 run, 0 failed
 ```
+
+---
+
+## New in v1.3
+
+### 33. Expression Filter (`--expr`)
+
+The `-f` / `--expr` option lets you compose complex match logic in a single argument, combining `glob()`, `regex()`, and `regex_match()` with boolean operators `and`, `or`, `not`, and parentheses. When `--expr` is used, the third positional argument (regex) is **not required**.
+
+**Grammar:**
+
+| Element | Description |
+|---------|-------------|
+| `glob("pattern")` | Convert the glob to an anchored regex and apply `regex_search` |
+| `regex("pattern")` | Substring regex search (default mode) |
+| `regex_search("pattern")` | Alias for `regex()` |
+| `regex_match("pattern")` | Full-path regex match |
+| `and` | Both sides must match |
+| `or` | Either side must match |
+| `not` | Negate the following expression |
+| `( … )` | Group sub-expressions |
+
+Operator precedence (highest to lowest): `not`, `and`, `or`. Use parentheses to override.
+
+Match C++ files, exclude build directories:
+
+```bash
+shell-cmd . "echo %1" --expr '(glob("*.cpp") or glob("*.hpp")) and not regex("build|CMakeFiles")'
+```
+
+Single function — equivalent to a regex positional argument:
+
+```bash
+shell-cmd . "wc -l %1" --expr 'regex("\.py$")'
+```
+
+Nested boolean logic:
+
+```bash
+shell-cmd . "echo %1" --expr '(glob("*.py") or glob("*.rs")) and not glob("*test*") and not regex("vendor")'
+```
+
+Full-path matching inside an expression:
+
+```bash
+shell-cmd . "echo %1" --expr 'regex_match("\\./src/.*\\.cpp")'
+```
+
+Combine `--expr` with other options:
+
+```bash
+shell-cmd -x "node_modules" --size +1K --type f . "wc -l %1" --expr 'glob("*.ts") or glob("*.tsx")'
+```
+
 ---
 
 ## Placeholder Quick Reference
@@ -579,8 +634,8 @@ DEST=/mnt/backup/music find ~/Music -regex '.*\.mp3$' -exec sh -c 'cp "$1" "$DES
 
 ### When to Use Which
 
-- **Use `shell-cmd`** when your command needs the filename separated from the path, when you want to inject extra arguments, or when you want built-in dry-run/verbose, parallel execution, confirm mode, exclude patterns, stop-on-error, and summary statistics.
-- **Use `find`** when you need boolean logic combining filters (`-and`, `-or`, `-not`) — or when you’re on a system where you can’t compile C++20 code.
+- **Use `shell-cmd`** when your command needs the filename separated from the path, when you want to inject extra arguments, or when you want built-in dry-run/verbose, parallel execution, confirm mode, exclude patterns, stop-on-error, composable expression filters (`--expr`), and summary statistics.
+- **Use `find`** when you're on a system where you can't compile C++20 code.
 
 ---
 
