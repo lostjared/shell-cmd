@@ -4,7 +4,9 @@
  * @details Walks a directory tree using std::filesystem, applies metadata filters (size, time,
  *          permissions, ownership, type), substitutes placeholders in a command template, and
  *          executes the resulting command for every matched entry. Supports parallel execution,
- *          exclude patterns, confirm mode, and stop-on-error.
+ *          exclude patterns, confirm mode, stop-on-error, and list-all mode (@c -l / @c --list-all)
+ *          which collects all matched paths and runs the command once with @c %%0 expanded to the
+ *          full list.
  * @see https://lostsidedead.biz
  * @license GNU GPL v3
  */
@@ -100,6 +102,8 @@ bool proc_cmd(const std::string &cmd, std::span<const std::string> text, std::st
 void wait_for_slot();
 void wait_all();
 std::string replace_string(std::string orig, const std::string &with, const std::string &rep);
+void fill_list(const fs::path &path, const std::string &cmd, const std::string &regex_str, std::vector<std::string> &args, std::vector<std::string> &files, int depth);
+std::string join(std::vector<std::string> &v);
 void add_directory(const fs::path &path, const std::string &cmd, const std::string &regex_str, std::vector<std::string> &args, int depth);
 int System(const std::string &command);
 
@@ -285,6 +289,20 @@ std::string replace_string(std::string orig, const std::string &with, const std:
     return orig;
 }
 
+/**
+ * @brief Recursively collect all file paths matching a regex and metadata filters.
+ * @details Used by the @c -l / @c --list-all mode. Walks the directory tree in the
+ *          same way as add_directory(), but instead of executing a command for each
+ *          match it appends the full path to @p files. After the traversal the caller
+ *          joins the collected paths and passes them to proc_cmd() as the @c file_string
+ *          argument so that @c %%0 expands to the entire list.
+ * @param path      The directory to scan.
+ * @param cmd       The command template (unused during collection; kept for signature symmetry).
+ * @param regex_str ECMAScript regex matched against each entry's full path.
+ * @param args      Mutable argument vector forwarded from main().
+ * @param files     [out] Vector that accumulates the full paths of all matched entries.
+ * @param depth     Current recursion depth (0 at the root call).
+ */
 void fill_list(const fs::path &path, const std::string &cmd, const std::string &regex_str, std::vector<std::string> &args, std::vector<std::string> &files, int depth) {
     if (opts.max_depth >= 0 && depth > opts.max_depth)
             return;
@@ -520,6 +538,13 @@ void wait_all() {
     }
 }
 
+/**
+ * @brief Join a vector of strings into a single space-delimited string.
+ * @details Used by the @c --list-all mode to combine all matched file paths into
+ *          one string that replaces @c %%0 in the command template.
+ * @param v The vector of strings to join.
+ * @return A string with each element separated by a space (trailing space included).
+ */
 std::string join(std::vector<std::string> &v) {
     std::string temp;
     for(auto &i : v) {

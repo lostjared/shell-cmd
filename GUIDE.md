@@ -13,9 +13,13 @@
 ```
 1. Parse command-line options and positional arguments
 2. Recursively walk the target directory
-3. For each file whose full path matches the regex:
-   a. Substitute placeholders in the command template
-   b. Fork a child process and execute the command via the configured shell (/bin/bash by default)
+3. If --list-all mode (-l):
+   a. Collect all matching file paths into a list
+   b. Run the command template once with %0 = all matched paths joined by spaces
+4. Otherwise (default per-file mode):
+   a. For each file whose full path matches the regex:
+      i.  Substitute placeholders in the command template
+      ii. Fork a child process and execute the command via the configured shell
 ```
 
 ### Argument Parsing
@@ -41,6 +45,8 @@ The function `add_directory()` walks the directory tree using `std::filesystem::
 - **Symlinks** are not explicitly followed — standard `directory_iterator` behavior applies.
 
 For every regular file whose full path matches the regex, the program calls `proc_cmd()`.
+
+In **list-all mode** (`-l` / `--list-all`), a separate function `fill_list()` walks the tree and collects all matching paths into a vector. After the walk completes, the paths are joined with spaces and `proc_cmd()` is called once with `%0` expanded to the full list.
 
 ### Placeholder Substitution
 
@@ -120,6 +126,7 @@ shell-cmd [options] <path> "<command %1 [%2 %3..]>" <regex> [extra_args..]
 | `-n` | `--dry-run` | **Dry-run** — print each command but don’t execute it |
 | `-v` | `--verbose` | **Verbose** — print each command before executing it |
 | `-a` | `--all` | **All files** — include hidden files and directories |
+| `-l` | `--list-all` | **List all** — collect all matches and run command once with `%0` = all matched paths |
 | `-d N` | `--depth N` | **Max depth** — limit recursion (0 = current directory only) |
 | `-s SIZE` | `--size SIZE` | **Size filter** — `+10M` (>10 MB), `-1K` (<1 KB), `4096` (exact bytes). Suffixes: K, M, G |
 | `-m DAYS` | `--mtime DAYS` | **Modification time** — `+7` (older than 7 days), `-1` (within last day), `3` (exactly 3 days) |
@@ -347,7 +354,7 @@ shell-cmd -l . "echo Found files: %0" ".*\.log$"
 
 In this case, `shell-cmd` first collects all matched files and then executes only one command, instead of running the command once per file.
 
-### 18. Delete Old Temp Files (Dry-Run)
+### 19. Delete Old Temp Files (Dry-Run)
 
 Preview deleting `.tmp` files older than 30 days:
 
@@ -355,7 +362,7 @@ Preview deleting `.tmp` files older than 30 days:
 shell-cmd --dry-run /tmp "rm %1" ".*\.tmp$" --mtime +30
 ```
 
-### 19. Find Executable Files
+### 20. Find Executable Files
 
 Find files with permission `755`:
 
@@ -363,31 +370,31 @@ Find files with permission `755`:
 shell-cmd . "echo %1" ".*" --perm 755 --type f
 ```
 
-### 20. List Files Owned by a User
+### 21. List Files Owned by a User
 
 ```bash
 shell-cmd /etc "echo %1" ".*\.conf$" --user root
 ```
 
-### 21. Find Files by Group
+### 22. Find Files by Group
 
 ```bash
 shell-cmd /var/www "echo %1" ".*" --group www-data
 ```
 
-### 22. List Only Directories
+### 23. List Only Directories
 
 ```bash
 shell-cmd . "echo %1" ".*src.*" --type d
 ```
 
-### 23. Find Symlinks
+### 24. Find Symlinks
 
 ```bash
 shell-cmd /usr/local "ls -la %1" ".*" --type l
 ```
 
-### 24. Combine Multiple Filters
+### 25. Combine Multiple Filters
 
 Find large `.log` files modified in the last 7 days, owned by `syslog`:
 
@@ -395,7 +402,7 @@ Find large `.log` files modified in the last 7 days, owned by `syslog`:
 shell-cmd /var/log "wc -l %1" ".*\.log$" -s +1M -m -7 -u syslog
 ```
 
-### 25. Long-Form Options Only
+### 26. Long-Form Options Only
 
 All flags work with `--long` form for readability in scripts:
 
@@ -407,7 +414,7 @@ shell-cmd --verbose --size +5K --type f --depth 2 ./src "wc -l %1" ".*\.(cpp|hpp
 
 ## New in v1.2
 
-### 26. Exclude Patterns
+### 27. Exclude Patterns
 
 Skip `node_modules` and `.git` directories when counting TypeScript lines:
 
@@ -415,7 +422,7 @@ Skip `node_modules` and `.git` directories when counting TypeScript lines:
 shell-cmd -x "node_modules|\.git" . "wc -l %1" ".*\.ts$"
 ```
 
-### 27. Basename & Extension Placeholders
+### 28. Basename & Extension Placeholders
 
 Convert WAV audio files to MP3, using `%b` to name the output file without the original extension:
 
@@ -429,7 +436,7 @@ Extract extensions to organize files by type:
 shell-cmd -n . "mkdir -p /tmp/by-ext/%e && cp %1 /tmp/by-ext/%e/%0" ".*"
 ```
 
-### 28. Parallel Execution
+### 29. Parallel Execution
 
 Resize images using 4 parallel jobs:
 
@@ -437,7 +444,7 @@ Resize images using 4 parallel jobs:
 shell-cmd -j 4 ./images "convert %1 -resize 800x600 /tmp/thumbs/%0" ".*\.jpg$"
 ```
 
-### 29. Confirm Mode
+### 30. Confirm Mode
 
 Interactively confirm before each destructive action:
 
@@ -451,7 +458,7 @@ Output:
 Execute: rm /tmp/old.bak ? [y/N]
 ```
 
-### 30. Stop on Error
+### 31. Stop on Error
 
 Compile all C files and stop at the first failure:
 
@@ -461,7 +468,7 @@ shell-cmd -e ./src "gcc -c %1 -o /tmp/%b.o" ".*\.c$"
 
 If any `gcc` invocation returns non-zero, processing halts immediately.
 
-### 31. Summary Statistics
+### 32. Summary Statistics
 
 A summary line is automatically printed to stderr after execution when verbose, dry-run, or any command has failed:
 
@@ -480,7 +487,7 @@ Summary: 12 matched, 12 run, 0 failed
 
 | Placeholder | Value |
 |-------------|-------|
-| `%0` | Filename only (e.g., `report.txt`) |
+| `%0` | Filename only (e.g., `report.txt`); in `--list-all` mode, all matched paths joined by spaces |
 | `%1` | Full path (e.g., `/home/user/docs/report.txt`) |
 | `%b` | Basename without extension (e.g., `report`) |
 | `%e` | File extension with dot (e.g., `.txt`) |
@@ -505,6 +512,7 @@ If you're familiar with `find . -exec`, here's how `shell-cmd` compares:
 | **Filtering by metadata** | Size (`-s`/`--size`), time (`-m`/`--mtime`), permissions (`-p`/`--perm`), owner (`-u`/`--user`), group (`-g`/`--group`), type (`-t`/`--type`) | Size, time, permissions, ownership, type, boolean logic |
 | **Exclude patterns** | Built-in `-x` / `--exclude` with regex | Requires negation logic or `! -name` |
 | **Parallel execution** | Built-in `-j N` / `--jobs N` | Requires `xargs -P` or GNU `parallel` |
+| **List-all mode** | Built-in `-l` / `--list-all` — run command once with all matches | Requires `xargs` or `+` terminator |
 | **Confirm mode** | Built-in `-c` / `--confirm` | Requires `-ok` (not universally supported) |
 | **Stop on error** | Built-in `-e` / `--stop-on-error` | No native support |
 | **Summary statistics** | Automatic (matched/run/failed counts) | No native support |
