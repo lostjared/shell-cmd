@@ -67,6 +67,8 @@ struct Options {
     int jobs = 1;                ///< Number of parallel jobs (1 = sequential).
     std::string shell = "/bin/bash"; ///< Shell to use for command execution.
     std::string shell_name = "bash"; ///< Shell argv[0] name.
+    bool collect_all = false; ///< Collect all files
+    
 };
 
 static Options opts; ///< Global runtime options.
@@ -94,7 +96,7 @@ static void sigint_handler(int /*sig*/) {
 SizeFilter parse_size_filter(const std::string &s);
 TimeFilter parse_time_filter(const std::string &s);
 bool matches_filters(const fs::directory_entry &entry);
-bool proc_cmd(const std::string &cmd, std::span<const std::string> text);
+bool proc_cmd(const std::string &cmd, std::span<const std::string> text, std::string file_string = "");
 void wait_for_slot();
 void wait_all();
 std::string replace_string(std::string orig, const std::string &with, const std::string &rep);
@@ -283,6 +285,64 @@ std::string replace_string(std::string orig, const std::string &with, const std:
     return orig;
 }
 
+void fill_list(const fs::path &path, const std::string &cmd, const std::string &regex_str, std::vector<std::string> &args, std::vector<std::string> &files, int depth) {
+    if (opts.max_depth >= 0 && depth > opts.max_depth)
+            return;
+        if (stop_requested || interrupted)
+            return;
+
+        std::error_code ec;
+        auto dir = fs::directory_iterator(path, fs::directory_options::skip_permission_denied, ec);
+        if (ec) {
+            std::cerr << std::format("Error: could not open directory: {}\n", path.string());
+            exit(EXIT_FAILURE);
+        }
+
+        for (const auto &entry : dir) {
+            if (stop_requested || interrupted)
+                return;
+            auto filename = entry.path().filename().string();
+            if (!opts.hidden && filename.starts_with('.'))
+                continue;
+
+            // Exclude pattern check
+            if (!opts.exclude_pattern.empty()) {
+                std::regex excl(opts.exclude_pattern, std::regex::ECMAScript);
+                if (std::regex_search(filename, excl))
+                    continue;
+            }
+
+            if (entry.is_directory(ec)) {
+                // If type filter is 'd', also match directories against regex
+                if (opts.type_filter == 'd') {
+                    std::regex ex(regex_str);
+                    auto fullpath = entry.path().string();
+                    if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
+                        stats.files_matched++;
+                        return;
+                    }
+                }
+                fill_list(entry.path(), cmd, regex_str, args, files, depth + 1);
+            } else if (entry.is_symlink(ec) && opts.type_filter == 'l') {
+                std::regex ex(regex_str);
+                auto fullpath = entry.path().string();
+                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
+                    stats.files_matched++;
+                    files.push_back(fullpath);
+                    continue;
+                }
+            } else if (entry.is_regular_file(ec) || (entry.is_symlink(ec) && opts.type_filter == 0)) {
+                std::regex ex(regex_str);
+                auto fullpath = entry.path().string();
+                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
+                    stats.files_matched++;
+                    files.push_back(fullpath);
+                    continue;
+                }
+            }
+        }
+}
+
 /**
  * @brief Recursively walk a directory, match entries against a regex and filters, and run commands.
  * @param path       The directory to scan.
@@ -460,6 +520,15 @@ void wait_all() {
     }
 }
 
+std::string join(std::vector<std::string> &v) {
+    std::string temp;
+    for(auto &i : v) {
+        temp += i + " ";
+    }
+    return temp;
+}
+
+
 /**
  * @brief Substitute placeholders in a command template and execute the result.
  * @details Replaces %%0 (filename), %%1 (full path), %%b (stem), %%e (extension),
@@ -469,21 +538,37 @@ void wait_all() {
  * @param text Span of strings: text[0] is the matched file path, text[1+] are extras.
  * @return true to continue processing, false to stop (stop-on-error triggered).
  */
-bool proc_cmd(const std::string &cmd, std::span<const std::string> text) {
+bool proc_cmd(const std::string &cmd, std::span<const std::string> text, std::string file_string) {
     std::string r = cmd;
     if (!text.empty()) {
-        auto fpath = fs::path(text[0]);
-        auto fname = fpath.filename().string();
-        r = replace_string(r, "%0", fname);
-        r = replace_string(r, "%b", fpath.stem().string());
-        r = replace_string(r, "%e", fpath.extension().string());
+        if(file_string.empty()) {
+            auto fpath = fs::path(text[0]);
+            auto fname = fpath.filename().string();
+            r = replace_string(r, "%0", fname);
+            r = replace_string(r, "%b", fpath.stem().string());
+            r = replace_string(r, "%e", fpath.extension().string());
+        }
     }
-    for (size_t i = 0; i < text.size(); ++i) {
-        auto placeholder = std::format("%{}", i + 1);
-        if (i == 0 && text[i].find(' ') != std::string::npos)
-            r = replace_string(r, placeholder, std::format("\"{}\"", text[i]));
-        else
-            r = replace_string(r, placeholder, std::string{text[i]});
+    if(file_string.empty() && !text.empty()) {
+        for (size_t i = 0; i < text.size(); ++i) {
+            auto placeholder = std::format("%{}", i + 1);
+            if (i == 0 && text[i].find(' ') != std::string::npos)
+                r = replace_string(r, placeholder, std::format("\"{}\"", text[i]));
+            else
+                r = replace_string(r, placeholder, std::string{text[i]});
+        }
+    } 
+    else if(!text.empty()) {
+         
+            r = replace_string(r, "%0", file_string);
+            for(size_t i = 0; i < text.size(); ++i) {
+                std::string placeholder = std::format("%{}", i + 1);
+                if(text[i].find(' ') != std::string::npos) {
+                    r = replace_string(r, placeholder, std::format("\"{}\"", text[i]));
+                }
+                else
+                    r = replace_string(r, placeholder, std::string{text[i]});
+            }
     }
 
     if (opts.confirm) {
@@ -544,15 +629,17 @@ void print_help(const char *prog) {
         "usage: {} [options] path \"command %1 [%2 %3..]\" regex [extra_args..]\n\n"
         "Recursively find files matching regex and run command for each.\n\n"
         "placeholders:\n"
-        "  %0          filename only (no path)\n"
+        "  %0          filename only (no path) not in list-all mode\n"
         "  %1          full path to matched file\n"
         "  %2+         extra arguments from command line\n"
         "  %b          basename without extension\n"
         "  %e          file extension (including dot)\n\n"
+        "  %0          for -l or --list-all single command with all matches\n"
         "options:\n"
         "  -n, --dry-run       dry-run, print commands without executing\n"
         "  -v, --verbose       verbose, print each command before running\n"
         "  -a, --all           include hidden files/directories\n"
+        "  -l, --list-all      single command with all files.\n"
         "  -d, --depth N       max recursion depth (0 = current dir only)\n"
         "  -s, --size SIZE     filter by size: +10M (>10MB), -1K (<1KB),\n"
         "                      4096 (exactly 4096 bytes). Suffixes: K, M, G\n"
@@ -619,6 +706,8 @@ int main(int argc, char **argv) {
         .addOptionDoubleValue('J', "jobs", "parallel jobs")
         .addOptionSingleValue('w', "shell path")
         .addOptionDoubleValue('W', "shell", "shell path")
+        .addOptionSingle('l', "list all matches")
+        .addOptionDouble('L', "list-all", "list all matches")
         .addOptionSingle('h', "show help")
         .addOptionDouble('H', "help", "show help");
 
@@ -699,6 +788,10 @@ int main(int argc, char **argv) {
                 opts.shell_name = (slash != std::string::npos) ? opts.shell.substr(slash + 1) : opts.shell;
                 break;
             }
+            case 'l':
+            case 'L':
+                opts.collect_all = true;
+                break;
             case 'h':
             case 'H':
                 print_help(argv[0]);
@@ -723,8 +816,10 @@ int main(int argc, char **argv) {
         const auto &path = positional[0];
         const auto &input = positional[1];
         const auto &regex_str = positional[2];
-        size_t index = 2;
-        std::vector<std::string> args{"filename"};
+        size_t index = (opts.collect_all) ? 1 : 2;
+        std::vector<std::string> args;
+        if(!opts.collect_all)
+            args.push_back("filename");
         for (size_t i = 3; i < positional.size(); ++i) {
             if (input.find(std::format("%{}", index)) == std::string::npos) {
                 std::cerr << std::format("Error: command has no placeholder %{} for extra argument \"{}\"\n", index, positional[i]);
@@ -733,6 +828,22 @@ int main(int argc, char **argv) {
             args.push_back(positional[i]);
             ++index;
         }
+        if(opts.collect_all) {
+            std::vector<std::string> files;
+            fill_list(path, input, regex_str, args, files, 0);
+            std::string all_files = join(files);
+            if(proc_cmd(input, args, all_files)) {
+                if(opts.verbose) {
+                    std::cout << std::format("Success command file list: {} .\n", all_files);
+                }
+                return EXIT_SUCCESS;
+            } else {
+                std::cout << "List all command failed.\n";
+                return EXIT_FAILURE;
+            }
+            return EXIT_SUCCESS;
+        }
+
         add_directory(path, input, regex_str, args, 0);
         if (opts.jobs > 1)
             wait_all();
