@@ -682,4 +682,4 @@ DEST=/mnt/backup/music find ~/Music -regex '.*\.mp3$' -exec sh -c 'cp "$1" "$DES
 
 ## License
 
-`shell-cmd` is released under the **GNU GPL v3**. See the [LICENSE](LICENSE) file for details.
+`shell-cmd` is released under the **GNU GPL v3**. See the [LICENSE](https://lostsidedead.biz/shell-cmd/LICENSE) file for details.
