@@ -51,6 +51,7 @@ shell-cmd [options] path "command %1 [%2 %3..]" regex [extra_args..]
 | `-g GROUP` | `--group GROUP` | Filter by group name |
 | `-t TYPE` | `--type TYPE` | Filter by type: `f` (file), `d` (directory), `l` (symlink) |
 | `-x REGEX` | `--exclude REGEX` | Exclude files/directories matching REGEX |
+| `-i` | `--glob-exclude` | Treat exclude pattern as a glob instead of regex |
 | `-e` | `--stop-on-error` | Stop on first command failure |
 | `-c` | `--confirm` | Prompt for confirmation before each command |
 | `-j N` | `--jobs N` | Run N commands in parallel (default: 1) |

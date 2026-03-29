@@ -4,9 +4,9 @@
  * @details Walks a directory tree using std::filesystem, applies metadata filters (size, time,
  *          permissions, ownership, type), substitutes placeholders in a command template, and
  *          executes the resulting command for every matched entry. Supports parallel execution,
- *          exclude patterns, confirm mode, stop-on-error, and list-all mode (@c -l / @c --list-all)
- *          which collects all matched paths and runs the command once with @c %%0 expanded to the
- *          full list.
+ *          exclude patterns (regex or glob via @c -i / @c --glob-exclude), confirm mode,
+ *          stop-on-error, and list-all mode (@c -l / @c --list-all) which collects all matched
+ *          paths and runs the command once with @c %%0 expanded to the full list.
  * @see https://lostsidedead.biz
  * @license GNU GPL v3
  */
@@ -92,7 +92,7 @@ struct Options {
     std::string user_filter;         ///< Owner username filter.
     std::string group_filter;        ///< Group name filter.
     char type_filter = 0;            ///< Type filter: 'f' file, 'd' directory, 'l' symlink.
-    std::string exclude_pattern;     ///< Regex pattern to exclude files/dirs.
+    std::string exclude_pattern;     ///< Regex (or glob, see glob_exclude) pattern to exclude files/dirs.
     bool stop_on_error = false;      ///< Halt on first command failure.
     bool confirm = false;            ///< Prompt for confirmation before each command.
     int jobs = 1;                    ///< Number of parallel jobs (1 = sequential).
@@ -100,7 +100,8 @@ struct Options {
     std::string shell_name = "bash"; ///< Shell argv[0] name.
     bool collect_all = false;        ///< If true (via -l/--list-all), collect all matched file paths and run one command with a combined argument list.
     RegExMode mode = RegExMode::REGEX_SEARCH; ///< RegEx mode
-    bool glob = false;               ///< If true, treat patterns as globs instead of regex.
+    bool glob = false;               ///< If true, treat search pattern as a glob instead of regex.
+    bool glob_exclude = false;       ///< If true (via -i/--glob-exclude), treat exclude pattern as a glob instead of regex.
 };
 
 static Options opts; ///< Global runtime options.
@@ -141,20 +142,62 @@ int System(const std::string &command);
 /**
  * @brief Convert a glob pattern to an equivalent regex string.
  * @details Escapes regex-special characters and translates glob wildcards:
- *          '*' becomes '.*', '?' becomes '.', all other special characters
- *          are escaped with a backslash.
- * @param glob The glob pattern string, e.g. "*.cpp", "test?".
- * @return The equivalent regex string.
+ *          '*' becomes '.*', '?' becomes '.', character class brackets '[...]'
+ *          are passed through with '!' or '^' mapped to '^' for negation,
+ *          and all other special characters are escaped with a backslash.
+ *          The result is anchored with '^' and '$'.
+ *
+ *          Used by @c --glob to convert the search pattern to regex, and by
+ *          @c --glob-exclude (@c -i) to convert the exclude pattern to regex.
+ * @param glob The glob pattern string, e.g. "*.cpp", "test?", "[!a-z]*".
+ * @return The equivalent anchored regex string, e.g. "^.*\.cpp$".
  */
 std::string glob_to_regex(const std::string &glob) {
     std::string result;
-    for (char c : glob) {
+    result += '^';
+
+    bool in_class = false;
+
+    for (size_t i = 0; i < glob.size(); ++i) {
+        char c = glob[i];
+
+        if (in_class) {
+            if (c == ']') {
+                in_class = false;
+                result += ']';
+            } else if (c == '\\') {
+                result += "\\\\";
+            } else {
+                result += c;
+            }
+            continue;
+        }
+
         switch (c) {
-        case '*': result += ".*"; break;
-        case '?': result += '.';  break;
-        case '.': case '\\': case '+': case '^': case '$':
-        case '|': case '(': case ')': case '[': case ']':
-        case '{': case '}':
+        case '*':
+            result += ".*";
+            break;
+        case '?':
+            result += '.';
+            break;
+        case '[':
+            in_class = true;
+            result += '[';
+            if (i + 1 < glob.size() && (glob[i + 1] == '!' || glob[i + 1] == '^')) {
+                result += '^';
+                ++i;
+            }
+            break;
+        case '.':
+        case '\\':
+        case '+':
+        case '^':
+        case '$':
+        case '|':
+        case '(':
+        case ')':
+        case '{':
+        case '}':
             result += '\\';
             result += c;
             break;
@@ -163,6 +206,11 @@ std::string glob_to_regex(const std::string &glob) {
             break;
         }
     }
+
+    if (in_class)
+        result += '\\';
+
+    result += '$';
     return result;
 }
 
@@ -811,6 +859,7 @@ void print_help(const char *prog) {
         << "  " << g << "-g, --group GROUP" << r << "   filter by group name\n"
         << "  " << g << "-t, --type TYPE" << r << "     filter by type: f (file), d (directory), l (symlink)\n"
         << "  " << g << "-x, --exclude REGEX" << r << " exclude files/directories matching REGEX\n"
+        << "  " << g << "-i, --glob-exclude" << r << "  treat exclude pattern as a glob instead of regex\n"
         << "  " << g << "-e, --stop-on-error" << r << " stop on first command failure\n"
         << "  " << g << "-c, --confirm" << r << "       prompt for confirmation before each command\n"
         << "  " << g << "-j, --jobs N" << r << "        run N commands in parallel (default: 1)\n"
@@ -873,6 +922,8 @@ int main(int argc, char **argv) {
         .addOptionDouble('Z', "regex-match", "Regex mode match")
         .addOptionSingle('b', "glob mode")
         .addOptionDouble('B', "glob", "glob mode")
+        .addOptionSingle('i', "glob exclude mode")
+        .addOptionDouble('I', "glob-exclude", "glob exclude mode")
         .addOptionDouble('H', "help", "show help");
 
     std::vector<std::string> positional;
@@ -968,6 +1019,10 @@ int main(int argc, char **argv) {
             case 'B':
                 opts.glob = true;
                 break;
+            case 'i':
+            case 'I':
+                opts.glob_exclude = true;
+                break;
             case '-':
                 positional.push_back(arg.arg_value);
                 break;
@@ -988,7 +1043,7 @@ int main(int argc, char **argv) {
         const auto &path = positional[0];
         const auto &input = positional[1];
         const std::string regex_str = opts.glob ? glob_to_regex(positional[2]) : positional[2];
-        if (opts.glob && !opts.exclude_pattern.empty())
+        if (opts.glob_exclude && !opts.exclude_pattern.empty())
             opts.exclude_pattern = glob_to_regex(opts.exclude_pattern);
         size_t index = (opts.collect_all) ? 1 : 2;
         std::vector<std::string> args;

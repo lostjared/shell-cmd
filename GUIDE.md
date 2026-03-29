@@ -135,6 +135,7 @@ shell-cmd [options] <path> "<command %1 [%2 %3..]>" <regex> [extra_args..]
 | `-g GROUP` | `--group GROUP` | **Group** — filter by group name |
 | `-t TYPE` | `--type TYPE` | **Type** — `f` (file), `d` (directory), `l` (symlink) |
 | `-x REGEX` | `--exclude REGEX` | **Exclude** — skip files/directories matching the regex |
+| `-i` | `--glob-exclude` | **Glob exclude** — treat the exclude pattern as a glob instead of regex |
 | `-e` | `--stop-on-error` | **Stop on error** — halt on first command failure |
 | `-c` | `--confirm` | **Confirm** — prompt yes/no before each command |
 | `-j N` | `--jobs N` | **Parallel** — run N commands concurrently (default: 1) |
@@ -436,10 +437,16 @@ Combine with `--regex-match` to match the full path using glob syntax:
 shell-cmd --glob --regex-match . "echo %1" "*cmake"
 ```
 
-Glob also applies to `--exclude`:
+Glob also applies to `--exclude` when combined with `--glob-exclude` / `-i`:
 
 ```bash
-shell-cmd --glob -x "*.o" . "echo %1" "*.c"
+shell-cmd --glob -x "*.o" --glob-exclude . "echo %1" "*.c"
+```
+
+Without `--glob-exclude`, the `-x` pattern is always treated as a regex:
+
+```bash
+shell-cmd --glob -x "build|CMakeFiles" . "echo %1" "*.cpp"
 ```
 
 ### 28. Basename & Extension Placeholders
