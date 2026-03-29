@@ -75,6 +75,11 @@ struct TimeFilter {
     int days = 0;         ///< Age threshold in days.
 };
 
+enum class RegExMode {
+    REGEX_SEARCH=1,
+    REGEX_MATCH
+};
+
 /// @brief Aggregates all runtime options parsed from the command line.
 struct Options {
     bool dry_run = false;            ///< Print commands without executing.
@@ -94,6 +99,8 @@ struct Options {
     std::string shell = "/bin/bash"; ///< Shell to use for command execution.
     std::string shell_name = "bash"; ///< Shell argv[0] name.
     bool collect_all = false;        ///< If true (via -l/--list-all), collect all matched file paths and run one command with a combined argument list.
+    RegExMode mode = RegExMode::REGEX_SEARCH; ///< RegEx mode
+    bool glob = false;               ///< If true, treat patterns as globs instead of regex.
 };
 
 static Options opts; ///< Global runtime options.
@@ -118,6 +125,7 @@ static void sigint_handler(int /*sig*/) {
     interrupted = 1;
 }
 
+std::string glob_to_regex(const std::string &glob);
 SizeFilter parse_size_filter(const std::string &s);
 TimeFilter parse_time_filter(const std::string &s);
 bool matches_filters(const fs::directory_entry &entry);
@@ -129,6 +137,34 @@ void fill_list(const fs::path &path, const std::string &cmd, const std::string &
 std::string join(std::vector<std::string> &v);
 void add_directory(const fs::path &path, const std::string &cmd, const std::string &regex_str, std::vector<std::string> &args, int depth);
 int System(const std::string &command);
+
+/**
+ * @brief Convert a glob pattern to an equivalent regex string.
+ * @details Escapes regex-special characters and translates glob wildcards:
+ *          '*' becomes '.*', '?' becomes '.', all other special characters
+ *          are escaped with a backslash.
+ * @param glob The glob pattern string, e.g. "*.cpp", "test?".
+ * @return The equivalent regex string.
+ */
+std::string glob_to_regex(const std::string &glob) {
+    std::string result;
+    for (char c : glob) {
+        switch (c) {
+        case '*': result += ".*"; break;
+        case '?': result += '.';  break;
+        case '.': case '\\': case '+': case '^': case '$':
+        case '|': case '(': case ')': case '[': case ']':
+        case '{': case '}':
+            result += '\\';
+            result += c;
+            break;
+        default:
+            result += c;
+            break;
+        }
+    }
+    return result;
+}
 
 /**
  * @brief Parse a size filter string into a SizeFilter.
@@ -349,8 +385,13 @@ void fill_list(const fs::path &path, const std::string &cmd, const std::string &
         // Exclude pattern check
         if (!opts.exclude_pattern.empty()) {
             std::regex excl(opts.exclude_pattern, std::regex::ECMAScript);
-            if (std::regex_search(filename, excl))
-                continue;
+            if(opts.mode == RegExMode::REGEX_SEARCH) {
+                if (std::regex_search(filename, excl)) 
+                    continue;
+            } else if(opts.mode == RegExMode::REGEX_MATCH) {
+                if(std::regex_match(filename,excl))
+                    continue;
+            }
         }
 
         if (entry.is_directory(ec)) {
@@ -358,27 +399,50 @@ void fill_list(const fs::path &path, const std::string &cmd, const std::string &
             if (opts.type_filter == 'd') {
                 std::regex ex(regex_str);
                 auto fullpath = entry.path().string();
-                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                    stats.files_matched++;
-                    return;
+                if(opts.mode == RegExMode::REGEX_SEARCH) {
+                    if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
+                        stats.files_matched++;
+                        return;
+                    }
+                } else if(opts.mode == RegExMode::REGEX_MATCH) {
+                    if (std::regex_match(fullpath, ex) && matches_filters(entry)) {
+                        stats.files_matched++;
+                        return;
+                    }
                 }
             }
             fill_list(entry.path(), cmd, regex_str, args, files, depth + 1);
         } else if (entry.is_symlink(ec) && opts.type_filter == 'l') {
             std::regex ex(regex_str);
             auto fullpath = entry.path().string();
-            if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                stats.files_matched++;
-                files.push_back(fullpath);
-                continue;
+            if(opts.mode == RegExMode::REGEX_SEARCH) {
+                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
+                    stats.files_matched++;
+                    files.push_back(fullpath);
+                    continue;
+                }
+            } else if(opts.mode == RegExMode::REGEX_MATCH) {
+                if (std::regex_match(fullpath, ex) && matches_filters(entry)) {
+                    stats.files_matched++;
+                    files.push_back(fullpath);
+                    continue;
+                }
             }
         } else if (entry.is_regular_file(ec) || (entry.is_symlink(ec) && opts.type_filter == 0)) {
             std::regex ex(regex_str);
             auto fullpath = entry.path().string();
-            if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                stats.files_matched++;
-                files.push_back(fullpath);
-                continue;
+            if(opts.mode == RegExMode::REGEX_SEARCH) {
+                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
+                    stats.files_matched++;
+                    files.push_back(fullpath);
+                    continue;
+                }
+            } else if(opts.mode == RegExMode::REGEX_MATCH) {
+                if (std::regex_match(fullpath, ex) && matches_filters(entry)) {
+                    stats.files_matched++;
+                    files.push_back(fullpath);
+                    continue;
+                }
             }
         }
     }
@@ -415,8 +479,13 @@ void add_directory(const fs::path &path, const std::string &cmd, const std::stri
         // Exclude pattern check
         if (!opts.exclude_pattern.empty()) {
             std::regex excl(opts.exclude_pattern, std::regex::ECMAScript);
-            if (std::regex_search(filename, excl))
-                continue;
+            if(opts.mode == RegExMode::REGEX_SEARCH) {
+                if (std::regex_search(filename, excl))
+                    continue;
+            } else if(opts.mode == RegExMode::REGEX_MATCH) {
+                if (std::regex_match(filename, excl))
+                    continue;
+            }
         }
 
         if (entry.is_directory(ec)) {
@@ -424,31 +493,59 @@ void add_directory(const fs::path &path, const std::string &cmd, const std::stri
             if (opts.type_filter == 'd') {
                 std::regex ex(regex_str);
                 auto fullpath = entry.path().string();
-                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                    stats.files_matched++;
-                    args[0] = fullpath;
-                    if (!proc_cmd(cmd, args))
-                        return;
+                if(opts.mode == RegExMode::REGEX_SEARCH) {
+                    if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
+                        stats.files_matched++;
+                        args[0] = fullpath;
+                        if (!proc_cmd(cmd, args))
+                            return;
+                    }
+                } else if(opts.mode == RegExMode::REGEX_MATCH) {
+                    if (std::regex_match(fullpath, ex) && matches_filters(entry)) {
+                        stats.files_matched++;
+                        args[0] = fullpath;
+                        if (!proc_cmd(cmd, args))
+                            return;
+                    }
                 }
             }
             add_directory(entry.path(), cmd, regex_str, args, depth + 1);
         } else if (entry.is_symlink(ec) && opts.type_filter == 'l') {
             std::regex ex(regex_str);
             auto fullpath = entry.path().string();
-            if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                stats.files_matched++;
-                args[0] = fullpath;
-                if (!proc_cmd(cmd, args))
-                    return;
+            if(opts.mode == RegExMode::REGEX_SEARCH) {
+                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
+                    stats.files_matched++;
+                    args[0] = fullpath;
+                    if (!proc_cmd(cmd, args))
+                        return;
+                }
+            } else if(opts.mode == RegExMode::REGEX_MATCH) {
+                if (std::regex_match(fullpath, ex) && matches_filters(entry)) {
+                    stats.files_matched++;
+                    args[0] = fullpath;
+                    if (!proc_cmd(cmd, args))
+                        return;
+                }
+
             }
         } else if (entry.is_regular_file(ec) || (entry.is_symlink(ec) && opts.type_filter == 0)) {
             std::regex ex(regex_str);
             auto fullpath = entry.path().string();
-            if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                stats.files_matched++;
-                args[0] = fullpath;
-                if (!proc_cmd(cmd, args))
-                    return;
+            if(opts.mode == RegExMode::REGEX_SEARCH) {
+                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
+                    stats.files_matched++;
+                    args[0] = fullpath;
+                    if (!proc_cmd(cmd, args))
+                        return;
+                }
+            } else if(opts.mode == RegExMode::REGEX_MATCH) {
+                if (std::regex_match(fullpath, ex) && matches_filters(entry)) {
+                    stats.files_matched++;
+                    args[0] = fullpath;
+                    if (!proc_cmd(cmd, args))
+                        return;
+                }
             }
         }
     }
@@ -698,6 +795,8 @@ void print_help(const char *prog) {
         << "  " << g << "%e" << r << "          file extension (including dot)\n\n"
         << "  (with -l/--list-all) %0 expands to all matched paths joined by spaces\n\n"
         << by << "options:" << r << "\n"
+        << "  " << g << "-z, --regex-match" << r << "   Use regex_match instead of search\n"
+        << "  " << g << "-b, --glob" << r << "          Treat pattern as a glob (*, ?) instead of regex\n"
         << "  " << g << "-n, --dry-run" << r << "       dry-run, print commands without executing\n"
         << "  " << g << "-v, --verbose" << r << "       verbose, print each command before running\n"
         << "  " << g << "-a, --all" << r << "           include hidden files/directories\n"
@@ -770,6 +869,10 @@ int main(int argc, char **argv) {
         .addOptionSingle('l', "list all matches")
         .addOptionDouble('L', "list-all", "list all matches")
         .addOptionSingle('h', "show help")
+        .addOptionSingle('z', "regex match mode")
+        .addOptionDouble('Z', "regex-match", "Regex mode match")
+        .addOptionSingle('b', "glob mode")
+        .addOptionDouble('B', "glob", "glob mode")
         .addOptionDouble('H', "help", "show help");
 
     std::vector<std::string> positional;
@@ -857,6 +960,14 @@ int main(int argc, char **argv) {
             case 'H':
                 print_help(argv[0]);
                 return 0;
+            case 'Z':
+            case 'z':
+                opts.mode = RegExMode::REGEX_MATCH;
+                break;
+            case 'b':
+            case 'B':
+                opts.glob = true;
+                break;
             case '-':
                 positional.push_back(arg.arg_value);
                 break;
@@ -876,7 +987,9 @@ int main(int argc, char **argv) {
     try {
         const auto &path = positional[0];
         const auto &input = positional[1];
-        const auto &regex_str = positional[2];
+        const std::string regex_str = opts.glob ? glob_to_regex(positional[2]) : positional[2];
+        if (opts.glob && !opts.exclude_pattern.empty())
+            opts.exclude_pattern = glob_to_regex(opts.exclude_pattern);
         size_t index = (opts.collect_all) ? 1 : 2;
         std::vector<std::string> args;
         if (!opts.collect_all)

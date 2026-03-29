@@ -122,8 +122,8 @@ shell-cmd [options] <path> "<command %1 [%2 %3..]>" <regex> [extra_args..]
 ### Options
 
 | Short | Long | Description |
-|-------|------|-------------|
-| `-n` | `--dry-run` | **Dry-run** — print each command but don’t execute it |
+|-------|------|-------------|| `-z` | `--regex-match` | **Regex match** — use `regex_match` (full path must match) instead of `regex_search` |
+| `-b` | `--glob` | **Glob mode** — treat pattern as a glob (`*`, `?`) instead of regex || `-n` | `--dry-run` | **Dry-run** — print each command but don’t execute it |
 | `-v` | `--verbose` | **Verbose** — print each command before executing it |
 | `-a` | `--all` | **All files** — include hidden files and directories |
 | `-l` | `--list-all` | **List all** — collect all matches and run command once with `%0` = all matched paths |
@@ -422,6 +422,26 @@ Skip `node_modules` and `.git` directories when counting TypeScript lines:
 shell-cmd -x "node_modules|\.git" . "wc -l %1" ".*\.ts$"
 ```
 
+### 28. Glob Mode
+
+Use `--glob` / `-b` to write familiar wildcard patterns instead of regex. `*` matches anything, `?` matches a single character, and special regex characters (`.`, `+`, `(`, etc.) are auto-escaped:
+
+```bash
+shell-cmd --glob . "echo %1" "*.cpp"
+```
+
+Combine with `--regex-match` to match the full path using glob syntax:
+
+```bash
+shell-cmd --glob --regex-match . "echo %1" "*cmake"
+```
+
+Glob also applies to `--exclude`:
+
+```bash
+shell-cmd --glob -x "*.o" . "echo %1" "*.c"
+```
+
 ### 28. Basename & Extension Placeholders
 
 Convert WAV audio files to MP3, using `%b` to name the output file without the original extension:
@@ -563,7 +583,7 @@ DEST=/mnt/backup/music find ~/Music -regex '.*\.mp3$' -exec sh -c 'cp "$1" "$DES
 
 2. **Quote the command template.** Since it contains `%` placeholders and often shell metacharacters, always wrap it in double quotes: `"command %1"`.
 
-3. **Escape regex special characters.** The regex uses ECMAScript syntax. To match a literal dot in file extensions, use `\.` — e.g., `".*\.cpp$"` not `".*cpp$"` (the latter also matches `acpp`).
+3. **Escape regex special characters.** The regex uses ECMAScript syntax. To match a literal dot in file extensions, use `\.` — e.g., `".*\.cpp$"` not `".*cpp$"` (the latter also matches `acpp`). Alternatively, use `--glob` to avoid regex escaping altogether: `--glob "*.cpp"`.
 
 4. **Use `%0` for output filenames.** When copying/converting files to a new directory, `%0` gives you the original filename without the source path, which is ideal for naming outputs.
 

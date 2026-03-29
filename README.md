@@ -38,6 +38,7 @@ shell-cmd [options] path "command %1 [%2 %3..]" regex [extra_args..]
 
 | Short | Long | Description |
 |-------|------|-------------|
+| `-b` | `--glob` | Treat pattern as a glob (`*`, `?`) instead of regex |
 | `-n` | `--dry-run` | Dry-run — print commands without executing |
 | `-v` | `--verbose` | Verbose — print each command before running |
 | `-a` | `--all` | Include hidden files and directories |
@@ -142,6 +143,18 @@ Combine filters — large `.log` files modified recently:
 
 ```bash
 shell-cmd /var/log "wc -l %1" ".*\.log$" -s +1M -m -7
+```
+
+Use glob patterns instead of regex:
+
+```bash
+shell-cmd --glob . "echo %1" "*.cpp"
+```
+
+Glob with regex-match mode:
+
+```bash
+shell-cmd --glob --regex-match . "echo %1" "*cmake"
 ```
 
 Exclude `node_modules` and `.git` directories:

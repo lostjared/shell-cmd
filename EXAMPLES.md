@@ -151,6 +151,28 @@ This collects all matched `.log` paths and then executes `grep` once with the fu
 
 ---
 
+## Using Glob Patterns Instead of Regex
+
+Use `--glob` / `-b` to write familiar wildcard patterns instead of regex. `*` matches anything, `?` matches a single character, and special regex characters are auto-escaped:
+
+```bash
+shell-cmd --glob . "echo %1" "*.cpp"
+```
+
+Combine with `--regex-match` to match the full path:
+
+```bash
+shell-cmd --glob --regex-match . "echo %1" "*cmake"
+```
+
+Glob with exclude:
+
+```bash
+shell-cmd --glob -x "*.o" . "echo %1" "*.c"
+```
+
+---
+
 ## Combine Options
 
 Preview (`-n`), include hidden files (`-a`), and limit depth to 2 levels (`-d 2`):
@@ -171,6 +193,7 @@ shell-cmd -n -a -d 2 ~ "wc -l %1" ".*\.bashrc|.*\.zshrc"
 
 | Flag | Effect |
 |------|--------|
+| `-b` | Glob mode — treat pattern as glob (`*`, `?`) instead of regex |
 | `-n` | Dry-run — print without executing |
 | `-v` | Verbose — print before executing |
 | `-a` | Include hidden files/directories |
