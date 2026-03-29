@@ -30,6 +30,30 @@
 
 namespace fs = std::filesystem;
 
+/**
+ * @brief Check whether to use color output on the given file descriptor.
+ * @details Respects the NO_COLOR environment variable convention (https://no-color.org/).
+ * @param fd File descriptor to check (1 = stdout, 2 = stderr).
+ * @return true if the fd is a terminal and NO_COLOR is not set.
+ */
+static bool use_color(int fd) {
+    if (std::getenv("NO_COLOR") != nullptr)
+        return false;
+    return isatty(fd) != 0;
+}
+
+/**
+ * @brief Print a colored error message to stderr.
+ * @details Prefixes the message with "Error: " (bold red when color is enabled).
+ * @param msg The error message to print.
+ */
+static void print_error(const std::string &msg) {
+    if (use_color(2))
+        std::cerr << std::format("\x1b[1;31mError:\x1b[0m {}\n", msg);
+    else
+        std::cerr << std::format("Error: {}\n", msg);
+}
+
 /// @brief Comparison operator for size and time filters.
 enum class CmpOp {
     EQ,
@@ -311,7 +335,7 @@ void fill_list(const fs::path &path, const std::string &cmd, const std::string &
     std::error_code ec;
     auto dir = fs::directory_iterator(path, fs::directory_options::skip_permission_denied, ec);
     if (ec) {
-        std::cerr << std::format("Error: could not open directory: {}\n", path.string());
+        print_error(std::format("could not open directory: {}", path.string()));
         exit(EXIT_FAILURE);
     }
 
@@ -377,7 +401,7 @@ void add_directory(const fs::path &path, const std::string &cmd, const std::stri
     std::error_code ec;
     auto dir = fs::directory_iterator(path, fs::directory_options::skip_permission_denied, ec);
     if (ec) {
-        std::cerr << std::format("Error: could not open directory: {}\n", path.string());
+        print_error(std::format("could not open directory: {}", path.string()));
         exit(EXIT_FAILURE);
     }
 
@@ -597,15 +621,22 @@ bool proc_cmd(const std::string &cmd, std::span<const std::string> text, std::st
     }
 
     if (opts.confirm) {
-        std::cout << std::format("Execute: {} ? [y/N] ", r);
+        if (use_color(1))
+            std::cout << std::format("\x1b[1;33mExecute:\x1b[0m {} \x1b[1m[y/N]\x1b[0m ", r);
+        else
+            std::cout << std::format("Execute: {} ? [y/N] ", r);
         std::string answer;
         std::getline(std::cin, answer);
         if (answer != "y" && answer != "Y")
             return true;
     }
 
-    if (opts.verbose || opts.dry_run)
-        std::cout << r << "\n";
+    if (opts.verbose || opts.dry_run) {
+        if (use_color(1))
+            std::cout << std::format("\x1b[36m{}\x1b[0m\n", r);
+        else
+            std::cout << r << "\n";
+    }
 
     if (opts.dry_run) {
         stats.commands_run++;
@@ -637,7 +668,7 @@ bool proc_cmd(const std::string &cmd, std::span<const std::string> text, std::st
     if (ret != 0) {
         stats.commands_failed++;
         if (opts.stop_on_error) {
-            std::cerr << std::format("Error: command failed (exit {}), stopping.\n", WEXITSTATUS(ret));
+            print_error(std::format("command failed (exit {}), stopping.", WEXITSTATUS(ret)));
             stop_requested = true;
             return false;
         }
@@ -650,37 +681,42 @@ bool proc_cmd(const std::string &cmd, std::span<const std::string> text, std::st
  * @param prog The program name (argv[0]).
  */
 void print_help(const char *prog) {
-    std::cout << std::format(
-        "usage: {} [options] path \"command %1 [%2 %3..]\" regex [extra_args..]\n\n"
-        "Recursively find files matching regex and run command for each.\n\n"
-        "placeholders:\n"
-        "  %0          filename only (no path, per-match mode)\n"
-        "  %1          full path to matched file\n"
-        "  %2+         extra arguments from command line\n"
-        "  %b          basename without extension\n"
-        "  %e          file extension (including dot)\n\n"
-        "  (with -l/--list-all) %0 expands to all matched paths joined by spaces\n"
-        "options:\n"
-        "  -n, --dry-run       dry-run, print commands without executing\n"
-        "  -v, --verbose       verbose, print each command before running\n"
-        "  -a, --all           include hidden files/directories\n"
-        "  -l, --list-all      collect all matches and invoke command once with %0=all-matches\n"
-        "  -d, --depth N       max recursion depth (0 = current dir only)\n"
-        "  -s, --size SIZE     filter by size: +10M (>10MB), -1K (<1KB),\n"
-        "                      4096 (exactly 4096 bytes). Suffixes: K, M, G\n"
-        "  -m, --mtime DAYS    filter by modification time: +7 (older than 7 days),\n"
-        "                      -1 (modified within last day), 3 (exactly 3 days)\n"
-        "  -p, --perm MODE     filter by permissions (octal), e.g. 755\n"
-        "  -u, --user USER     filter by owner username\n"
-        "  -g, --group GROUP   filter by group name\n"
-        "  -t, --type TYPE     filter by type: f (file), d (directory), l (symlink)\n"
-        "  -x, --exclude REGEX exclude files/directories matching REGEX\n"
-        "  -e, --stop-on-error stop on first command failure\n"
-        "  -c, --confirm       prompt for confirmation before each command\n"
-        "  -j, --jobs N        run N commands in parallel (default: 1)\n"
-        "  -w, --shell SHELL   shell to use for execution (default: /bin/bash)\n"
-        "  -h, --help          show this help\n",
-        prog);
+    bool co = use_color(1);
+    std::string b  = co ? "\x1b[1m" : "";
+    std::string bw = co ? "\x1b[1;37m" : "";
+    std::string by = co ? "\x1b[1;33m" : "";
+    std::string g  = co ? "\x1b[32m" : "";
+    std::string r  = co ? "\x1b[0m" : "";
+    std::cout
+        << b << "usage:" << r << " " << bw << prog << r << " [options] path \"command %1 [%2 %3..]\" regex [extra_args..]\n\n"
+        << bw << "Recursively find files matching regex and run command for each." << r << "\n\n"
+        << by << "placeholders:" << r << "\n"
+        << "  " << g << "%0" << r << "          filename only (no path, per-match mode)\n"
+        << "  " << g << "%1" << r << "          full path to matched file\n"
+        << "  " << g << "%2+" << r << "         extra arguments from command line\n"
+        << "  " << g << "%b" << r << "          basename without extension\n"
+        << "  " << g << "%e" << r << "          file extension (including dot)\n\n"
+        << "  (with -l/--list-all) %0 expands to all matched paths joined by spaces\n\n"
+        << by << "options:" << r << "\n"
+        << "  " << g << "-n, --dry-run" << r << "       dry-run, print commands without executing\n"
+        << "  " << g << "-v, --verbose" << r << "       verbose, print each command before running\n"
+        << "  " << g << "-a, --all" << r << "           include hidden files/directories\n"
+        << "  " << g << "-l, --list-all" << r << "      collect all matches and invoke command once with %0=all-matches\n"
+        << "  " << g << "-d, --depth N" << r << "       max recursion depth (0 = current dir only)\n"
+        << "  " << g << "-s, --size SIZE" << r << "     filter by size: +10M (>10MB), -1K (<1KB),\n"
+        << "                      4096 (exactly 4096 bytes). Suffixes: K, M, G\n"
+        << "  " << g << "-m, --mtime DAYS" << r << "    filter by modification time: +7 (older than 7 days),\n"
+        << "                      -1 (modified within last day), 3 (exactly 3 days)\n"
+        << "  " << g << "-p, --perm MODE" << r << "     filter by permissions (octal), e.g. 755\n"
+        << "  " << g << "-u, --user USER" << r << "     filter by owner username\n"
+        << "  " << g << "-g, --group GROUP" << r << "   filter by group name\n"
+        << "  " << g << "-t, --type TYPE" << r << "     filter by type: f (file), d (directory), l (symlink)\n"
+        << "  " << g << "-x, --exclude REGEX" << r << " exclude files/directories matching REGEX\n"
+        << "  " << g << "-e, --stop-on-error" << r << " stop on first command failure\n"
+        << "  " << g << "-c, --confirm" << r << "       prompt for confirmation before each command\n"
+        << "  " << g << "-j, --jobs N" << r << "        run N commands in parallel (default: 1)\n"
+        << "  " << g << "-w, --shell SHELL" << r << "   shell to use for execution (default: /bin/bash)\n"
+        << "  " << g << "-h, --help" << r << "          show this help\n";
 }
 
 /**
@@ -784,7 +820,7 @@ int main(int argc, char **argv) {
                 if (arg.arg_value == "f" || arg.arg_value == "d" || arg.arg_value == "l") {
                     opts.type_filter = arg.arg_value[0];
                 } else {
-                    std::cerr << std::format("Error: invalid type '{}'. Use f (file), d (directory), or l (symlink).\n", arg.arg_value);
+                    print_error(std::format("invalid type '{}'. Use f (file), d (directory), or l (symlink).", arg.arg_value));
                     return EXIT_FAILURE;
                 }
                 break;
@@ -827,12 +863,12 @@ int main(int argc, char **argv) {
             }
         }
     } catch (const ArgException<std::string> &e) {
-        std::cerr << std::format("Error: {}\n", e.text());
+        print_error(e.text());
         return EXIT_FAILURE;
     }
 
     if (positional.size() < 3) {
-        std::cerr << "Error: at least three positional arguments required.\n";
+        print_error("at least three positional arguments required.");
         print_help(argv[0]);
         return EXIT_FAILURE;
     }
@@ -847,7 +883,7 @@ int main(int argc, char **argv) {
             args.push_back("filename");
         for (size_t i = 3; i < positional.size(); ++i) {
             if (input.find(std::format("%{}", index)) == std::string::npos) {
-                std::cerr << std::format("Error: command has no placeholder %{} for extra argument \"{}\"\n", index, positional[i]);
+                print_error(std::format("command has no placeholder %{} for extra argument \"{}\"", index, positional[i]));
                 return EXIT_FAILURE;
             }
             args.push_back(positional[i]);
@@ -882,15 +918,29 @@ int main(int argc, char **argv) {
             child_pids.clear();
             std::cerr << "\nInterrupted.\n";
             if (opts.verbose || opts.dry_run || stats.commands_failed > 0 || stats.commands_run > 0) {
-                std::cerr << std::format("Summary: {} matched, {} run, {} failed\n",
-                                         stats.files_matched, stats.commands_run, stats.commands_failed);
+                if (use_color(2)) {
+                    std::cerr << std::format("\x1b[1mSummary:\x1b[0m \x1b[1;32m{}\x1b[0m matched, \x1b[1;33m{}\x1b[0m run, {}{}\x1b[0m failed\n",
+                                             stats.files_matched, stats.commands_run,
+                                             stats.commands_failed > 0 ? "\x1b[1;31m" : "\x1b[1;32m",
+                                             stats.commands_failed);
+                } else {
+                    std::cerr << std::format("Summary: {} matched, {} run, {} failed\n",
+                                             stats.files_matched, stats.commands_run, stats.commands_failed);
+                }
             }
             return 130;
         }
 
         if (opts.verbose || opts.dry_run || stats.commands_failed > 0) {
-            std::cerr << std::format("\nSummary: {} matched, {} run, {} failed\n",
-                                     stats.files_matched, stats.commands_run, stats.commands_failed);
+            if (use_color(2)) {
+                std::cerr << std::format("\n\x1b[1mSummary:\x1b[0m \x1b[1;32m{}\x1b[0m matched, \x1b[1;33m{}\x1b[0m run, {}{}\x1b[0m failed\n",
+                                         stats.files_matched, stats.commands_run,
+                                         stats.commands_failed > 0 ? "\x1b[1;31m" : "\x1b[1;32m",
+                                         stats.commands_failed);
+            } else {
+                std::cerr << std::format("\nSummary: {} matched, {} run, {} failed\n",
+                                         stats.files_matched, stats.commands_run, stats.commands_failed);
+            }
         }
     } catch (const std::exception &e) {
         std::cerr << "Exception: " << e.what() << "\n";
