@@ -53,24 +53,23 @@ struct TimeFilter {
 
 /// @brief Aggregates all runtime options parsed from the command line.
 struct Options {
-    bool dry_run = false;        ///< Print commands without executing.
-    bool verbose = false;        ///< Print commands before executing.
-    bool hidden = false;         ///< Include hidden (dot) files/directories.
-    int max_depth = -1;          ///< Max recursion depth (-1 = unlimited).
-    SizeFilter size_filter;      ///< Optional size filter.
-    TimeFilter mtime_filter;     ///< Optional modification-time filter.
-    std::string perm_filter;     ///< Octal permission string, e.g. "755".
-    std::string user_filter;     ///< Owner username filter.
-    std::string group_filter;    ///< Group name filter.
-    char type_filter = 0;        ///< Type filter: 'f' file, 'd' directory, 'l' symlink.
-    std::string exclude_pattern; ///< Regex pattern to exclude files/dirs.
-    bool stop_on_error = false;  ///< Halt on first command failure.
-    bool confirm = false;        ///< Prompt for confirmation before each command.
-    int jobs = 1;                ///< Number of parallel jobs (1 = sequential).
+    bool dry_run = false;            ///< Print commands without executing.
+    bool verbose = false;            ///< Print commands before executing.
+    bool hidden = false;             ///< Include hidden (dot) files/directories.
+    int max_depth = -1;              ///< Max recursion depth (-1 = unlimited).
+    SizeFilter size_filter;          ///< Optional size filter.
+    TimeFilter mtime_filter;         ///< Optional modification-time filter.
+    std::string perm_filter;         ///< Octal permission string, e.g. "755".
+    std::string user_filter;         ///< Owner username filter.
+    std::string group_filter;        ///< Group name filter.
+    char type_filter = 0;            ///< Type filter: 'f' file, 'd' directory, 'l' symlink.
+    std::string exclude_pattern;     ///< Regex pattern to exclude files/dirs.
+    bool stop_on_error = false;      ///< Halt on first command failure.
+    bool confirm = false;            ///< Prompt for confirmation before each command.
+    int jobs = 1;                    ///< Number of parallel jobs (1 = sequential).
     std::string shell = "/bin/bash"; ///< Shell to use for command execution.
     std::string shell_name = "bash"; ///< Shell argv[0] name.
-    bool collect_all = false; ///< If true (via -l/--list-all), collect all matched file paths and run one command with a combined argument list.
-
+    bool collect_all = false;        ///< If true (via -l/--list-all), collect all matched file paths and run one command with a combined argument list.
 };
 
 static Options opts; ///< Global runtime options.
@@ -82,9 +81,9 @@ struct Stats {
     int commands_failed = 0; ///< Number of commands that returned non-zero.
 };
 
-static Stats stats;                   ///< Global execution statistics.
-static std::vector<pid_t> child_pids; ///< PIDs of outstanding child processes (parallel mode).
-static bool stop_requested = false;   ///< Set to true when stop-on-error triggers.
+static Stats stats;                           ///< Global execution statistics.
+static std::vector<pid_t> child_pids;         ///< PIDs of outstanding child processes (parallel mode).
+static bool stop_requested = false;           ///< Set to true when stop-on-error triggers.
 static volatile sig_atomic_t interrupted = 0; ///< Set to 1 by SIGINT handler (Ctrl+C).
 
 /**
@@ -305,60 +304,60 @@ std::string replace_string(std::string orig, const std::string &with, const std:
  */
 void fill_list(const fs::path &path, const std::string &cmd, const std::string &regex_str, std::vector<std::string> &args, std::vector<std::string> &files, int depth) {
     if (opts.max_depth >= 0 && depth > opts.max_depth)
-            return;
+        return;
+    if (stop_requested || interrupted)
+        return;
+
+    std::error_code ec;
+    auto dir = fs::directory_iterator(path, fs::directory_options::skip_permission_denied, ec);
+    if (ec) {
+        std::cerr << std::format("Error: could not open directory: {}\n", path.string());
+        exit(EXIT_FAILURE);
+    }
+
+    for (const auto &entry : dir) {
         if (stop_requested || interrupted)
             return;
+        auto filename = entry.path().filename().string();
+        if (!opts.hidden && filename.starts_with('.'))
+            continue;
 
-        std::error_code ec;
-        auto dir = fs::directory_iterator(path, fs::directory_options::skip_permission_denied, ec);
-        if (ec) {
-            std::cerr << std::format("Error: could not open directory: {}\n", path.string());
-            exit(EXIT_FAILURE);
-        }
-
-        for (const auto &entry : dir) {
-            if (stop_requested || interrupted)
-                return;
-            auto filename = entry.path().filename().string();
-            if (!opts.hidden && filename.starts_with('.'))
+        // Exclude pattern check
+        if (!opts.exclude_pattern.empty()) {
+            std::regex excl(opts.exclude_pattern, std::regex::ECMAScript);
+            if (std::regex_search(filename, excl))
                 continue;
+        }
 
-            // Exclude pattern check
-            if (!opts.exclude_pattern.empty()) {
-                std::regex excl(opts.exclude_pattern, std::regex::ECMAScript);
-                if (std::regex_search(filename, excl))
-                    continue;
+        if (entry.is_directory(ec)) {
+            // If type filter is 'd', also match directories against regex
+            if (opts.type_filter == 'd') {
+                std::regex ex(regex_str);
+                auto fullpath = entry.path().string();
+                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
+                    stats.files_matched++;
+                    return;
+                }
             }
-
-            if (entry.is_directory(ec)) {
-                // If type filter is 'd', also match directories against regex
-                if (opts.type_filter == 'd') {
-                    std::regex ex(regex_str);
-                    auto fullpath = entry.path().string();
-                    if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                        stats.files_matched++;
-                        return;
-                    }
-                }
-                fill_list(entry.path(), cmd, regex_str, args, files, depth + 1);
-            } else if (entry.is_symlink(ec) && opts.type_filter == 'l') {
-                std::regex ex(regex_str);
-                auto fullpath = entry.path().string();
-                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                    stats.files_matched++;
-                    files.push_back(fullpath);
-                    continue;
-                }
-            } else if (entry.is_regular_file(ec) || (entry.is_symlink(ec) && opts.type_filter == 0)) {
-                std::regex ex(regex_str);
-                auto fullpath = entry.path().string();
-                if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
-                    stats.files_matched++;
-                    files.push_back(fullpath);
-                    continue;
-                }
+            fill_list(entry.path(), cmd, regex_str, args, files, depth + 1);
+        } else if (entry.is_symlink(ec) && opts.type_filter == 'l') {
+            std::regex ex(regex_str);
+            auto fullpath = entry.path().string();
+            if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
+                stats.files_matched++;
+                files.push_back(fullpath);
+                continue;
+            }
+        } else if (entry.is_regular_file(ec) || (entry.is_symlink(ec) && opts.type_filter == 0)) {
+            std::regex ex(regex_str);
+            auto fullpath = entry.path().string();
+            if (std::regex_search(fullpath, ex) && matches_filters(entry)) {
+                stats.files_matched++;
+                files.push_back(fullpath);
+                continue;
             }
         }
+    }
 }
 
 /**
@@ -547,12 +546,11 @@ void wait_all() {
  */
 std::string join(std::vector<std::string> &v) {
     std::string temp;
-    for(auto &i : v) {
+    for (auto &i : v) {
         temp += i + " ";
     }
     return temp;
 }
-
 
 /**
  * @brief Substitute placeholders in a command template and execute the result.
@@ -570,7 +568,7 @@ std::string join(std::vector<std::string> &v) {
 bool proc_cmd(const std::string &cmd, std::span<const std::string> text, std::string file_string) {
     std::string r = cmd;
     if (!text.empty()) {
-        if(file_string.empty()) {
+        if (file_string.empty()) {
             auto fpath = fs::path(text[0]);
             auto fname = fpath.filename().string();
             r = replace_string(r, "%0", fname);
@@ -578,7 +576,7 @@ bool proc_cmd(const std::string &cmd, std::span<const std::string> text, std::st
             r = replace_string(r, "%e", fpath.extension().string());
         }
     }
-    if(file_string.empty() && !text.empty()) {
+    if (file_string.empty() && !text.empty()) {
         for (size_t i = 0; i < text.size(); ++i) {
             auto placeholder = std::format("%{}", i + 1);
             if (i == 0 && text[i].find(' ') != std::string::npos)
@@ -586,18 +584,16 @@ bool proc_cmd(const std::string &cmd, std::span<const std::string> text, std::st
             else
                 r = replace_string(r, placeholder, std::string{text[i]});
         }
-    } 
-    else  {
-         
-            r = replace_string(r, "%0", file_string);
-            for(size_t i = 0; i < text.size(); ++i) {
-                std::string placeholder = std::format("%{}", i + 1);
-                if(text[i].find(' ') != std::string::npos) {
-                    r = replace_string(r, placeholder, std::format("\"{}\"", text[i]));
-                }
-                else
-                    r = replace_string(r, placeholder, std::string{text[i]});
-            }
+    } else {
+
+        r = replace_string(r, "%0", file_string);
+        for (size_t i = 0; i < text.size(); ++i) {
+            std::string placeholder = std::format("%{}", i + 1);
+            if (text[i].find(' ') != std::string::npos) {
+                r = replace_string(r, placeholder, std::format("\"{}\"", text[i]));
+            } else
+                r = replace_string(r, placeholder, std::string{text[i]});
+        }
     }
 
     if (opts.confirm) {
@@ -847,7 +843,7 @@ int main(int argc, char **argv) {
         const auto &regex_str = positional[2];
         size_t index = (opts.collect_all) ? 1 : 2;
         std::vector<std::string> args;
-        if(!opts.collect_all)
+        if (!opts.collect_all)
             args.push_back("filename");
         for (size_t i = 3; i < positional.size(); ++i) {
             if (input.find(std::format("%{}", index)) == std::string::npos) {
@@ -857,12 +853,12 @@ int main(int argc, char **argv) {
             args.push_back(positional[i]);
             ++index;
         }
-        if(opts.collect_all) {
+        if (opts.collect_all) {
             std::vector<std::string> files;
             fill_list(path, input, regex_str, args, files, 0);
             std::string all_files = join(files);
-            if(proc_cmd(input, args, all_files)) {
-                if(opts.verbose) {
+            if (proc_cmd(input, args, all_files)) {
+                if (opts.verbose) {
                     std::cout << std::format("Success command file list: {} .\n", all_files);
                 }
                 return EXIT_SUCCESS;
