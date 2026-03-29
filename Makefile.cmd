@@ -1,6 +1,6 @@
 OBJ=$(patsubst %.cpp,%.o,$(wildcard *.cpp))
 PROGRAM=shell-cmd
-CFLAGS= -std=c++17
+CFLAGS= -std=c++20
 LDFLAGS=
 
 %.o: %.cpp
@@ -8,8 +8,6 @@ LDFLAGS=
 
 $(PROGRAM): $(OBJ)
 	$(CXX) -o $(PROGRAM) $(OBJ) $(LDFLAGS)
-
-
 
 all: $(PROGRAM)
 
