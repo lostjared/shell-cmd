@@ -78,33 +78,33 @@ struct TimeFilter {
 };
 
 enum class RegExMode {
-    REGEX_SEARCH=1,
+    REGEX_SEARCH = 1,
     REGEX_MATCH
 };
 
 /// @brief Aggregates all runtime options parsed from the command line.
 struct Options {
-    bool dry_run = false;            ///< Print commands without executing.
-    bool verbose = false;            ///< Print commands before executing.
-    bool hidden = false;             ///< Include hidden (dot) files/directories.
-    int max_depth = -1;              ///< Max recursion depth (-1 = unlimited).
-    SizeFilter size_filter;          ///< Optional size filter.
-    TimeFilter mtime_filter;         ///< Optional modification-time filter.
-    std::string perm_filter;         ///< Octal permission string, e.g. "755".
-    std::string user_filter;         ///< Owner username filter.
-    std::string group_filter;        ///< Group name filter.
-    char type_filter = 0;            ///< Type filter: 'f' file, 'd' directory, 'l' symlink.
-    std::string exclude_pattern;     ///< Regex (or glob, see glob_exclude) pattern to exclude files/dirs.
-    bool stop_on_error = false;      ///< Halt on first command failure.
-    bool confirm = false;            ///< Prompt for confirmation before each command.
-    int jobs = 1;                    ///< Number of parallel jobs (1 = sequential).
-    std::string shell = "/bin/bash"; ///< Shell to use for command execution.
-    std::string shell_name = "bash"; ///< Shell argv[0] name.
-    bool collect_all = false;        ///< If true (via -l/--list-all), collect all matched file paths and run one command with a combined argument list.
+    bool dry_run = false;                     ///< Print commands without executing.
+    bool verbose = false;                     ///< Print commands before executing.
+    bool hidden = false;                      ///< Include hidden (dot) files/directories.
+    int max_depth = -1;                       ///< Max recursion depth (-1 = unlimited).
+    SizeFilter size_filter;                   ///< Optional size filter.
+    TimeFilter mtime_filter;                  ///< Optional modification-time filter.
+    std::string perm_filter;                  ///< Octal permission string, e.g. "755".
+    std::string user_filter;                  ///< Owner username filter.
+    std::string group_filter;                 ///< Group name filter.
+    char type_filter = 0;                     ///< Type filter: 'f' file, 'd' directory, 'l' symlink.
+    std::string exclude_pattern;              ///< Regex (or glob, see glob_exclude) pattern to exclude files/dirs.
+    bool stop_on_error = false;               ///< Halt on first command failure.
+    bool confirm = false;                     ///< Prompt for confirmation before each command.
+    int jobs = 1;                             ///< Number of parallel jobs (1 = sequential).
+    std::string shell = "/bin/bash";          ///< Shell to use for command execution.
+    std::string shell_name = "bash";          ///< Shell argv[0] name.
+    bool collect_all = false;                 ///< If true (via -l/--list-all), collect all matched file paths and run one command with a combined argument list.
     RegExMode mode = RegExMode::REGEX_SEARCH; ///< RegEx mode
-    bool glob = false;               ///< If true, treat search pattern as a glob instead of regex.
-    bool glob_exclude = false;       ///< If true (via -i/--glob-exclude), treat exclude pattern as a glob instead of regex.
-    std::string expr_str;            ///< Expression filter string from --expr.
+    bool glob = false;                        ///< If true, treat search pattern as a glob instead of regex.
+    bool glob_exclude = false;                ///< If true (via -i/--glob-exclude), treat exclude pattern as a glob instead of regex.
+    std::string expr_str;                     ///< Expression filter string from --expr.
 };
 
 static Options opts; ///< Global runtime options.
@@ -220,14 +220,21 @@ std::string glob_to_regex(const std::string &glob) {
 // --- Expression filter (--expr) ------------------------------------------------
 
 /// @brief Node types for the expression filter AST.
-enum class ExprType { GLOB, REGEX_SEARCH, REGEX_MATCH, AND, OR, NOT };
+enum class ExprType {
+    GLOB,
+    REGEX_SEARCH,
+    REGEX_MATCH,
+    AND,
+    OR,
+    NOT
+};
 
 /// @brief AST node for expression-based file matching.
 struct ExprNode {
     ExprType type;
-    std::regex compiled;               ///< Pre-compiled regex (leaf nodes only).
-    std::unique_ptr<ExprNode> left;    ///< Left child (AND/OR) or sole child (NOT).
-    std::unique_ptr<ExprNode> right;   ///< Right child (AND/OR only).
+    std::regex compiled;             ///< Pre-compiled regex (leaf nodes only).
+    std::unique_ptr<ExprNode> left;  ///< Left child (AND/OR) or sole child (NOT).
+    std::unique_ptr<ExprNode> right; ///< Right child (AND/OR only).
 
     /// @brief Evaluate this expression node against a file path.
     bool evaluate(const std::string &path) const {
@@ -251,7 +258,13 @@ struct ExprNode {
 
 /// @brief Token produced by the expression tokenizer.
 struct ExprToken {
-    enum Type { IDENT, STRING, LPAREN, RPAREN, END } type;
+    enum Type {
+        IDENT,
+        STRING,
+        LPAREN,
+        RPAREN,
+        END
+    } type;
     std::string value;
 };
 
@@ -263,15 +276,22 @@ class ExprTokenizer {
         while (pos < src.size() && std::isspace(static_cast<unsigned char>(src[pos])))
             ++pos;
     }
-public:
+
+  public:
     explicit ExprTokenizer(const std::string &s) : src(s) {}
     ExprToken next() {
         skip_ws();
         if (pos >= src.size())
             return {ExprToken::END, ""};
         char c = src[pos];
-        if (c == '(') { ++pos; return {ExprToken::LPAREN, "("}; }
-        if (c == ')') { ++pos; return {ExprToken::RPAREN, ")"}; }
+        if (c == '(') {
+            ++pos;
+            return {ExprToken::LPAREN, "("};
+        }
+        if (c == ')') {
+            ++pos;
+            return {ExprToken::RPAREN, ")"};
+        }
         if (c == '"' || c == '\'') {
             char q = c;
             ++pos;
@@ -395,7 +415,8 @@ class ExprParser {
         }
         return left;
     }
-public:
+
+  public:
     explicit ExprParser(const std::string &s) : tok(s) {}
     std::unique_ptr<ExprNode> parse() {
         advance();
@@ -638,11 +659,11 @@ void fill_list(const fs::path &path, const std::string &cmd, const std::string &
         // Exclude pattern check
         if (!opts.exclude_pattern.empty()) {
             std::regex excl(opts.exclude_pattern, std::regex::ECMAScript);
-            if(opts.mode == RegExMode::REGEX_SEARCH) {
-                if (std::regex_search(filename, excl)) 
+            if (opts.mode == RegExMode::REGEX_SEARCH) {
+                if (std::regex_search(filename, excl))
                     continue;
-            } else if(opts.mode == RegExMode::REGEX_MATCH) {
-                if(std::regex_match(filename,excl))
+            } else if (opts.mode == RegExMode::REGEX_MATCH) {
+                if (std::regex_match(filename, excl))
                     continue;
             }
         }
@@ -703,10 +724,10 @@ void add_directory(const fs::path &path, const std::string &cmd, const std::stri
         // Exclude pattern check
         if (!opts.exclude_pattern.empty()) {
             std::regex excl(opts.exclude_pattern, std::regex::ECMAScript);
-            if(opts.mode == RegExMode::REGEX_SEARCH) {
+            if (opts.mode == RegExMode::REGEX_SEARCH) {
                 if (std::regex_search(filename, excl))
                     continue;
-            } else if(opts.mode == RegExMode::REGEX_MATCH) {
+            } else if (opts.mode == RegExMode::REGEX_MATCH) {
                 if (std::regex_match(filename, excl))
                     continue;
             }
@@ -971,11 +992,11 @@ bool proc_cmd(const std::string &cmd, std::span<const std::string> text, std::st
  */
 void print_help(const char *prog) {
     bool co = use_color(1);
-    std::string b  = co ? "\x1b[1m" : "";
+    std::string b = co ? "\x1b[1m" : "";
     std::string bw = co ? "\x1b[1;37m" : "";
     std::string by = co ? "\x1b[1;33m" : "";
-    std::string g  = co ? "\x1b[32m" : "";
-    std::string r  = co ? "\x1b[0m" : "";
+    std::string g = co ? "\x1b[32m" : "";
+    std::string r = co ? "\x1b[0m" : "";
     std::cout
         << b << "usage:" << r << " " << bw << prog << r << " [options] path \"command %1 [%2 %3..]\" regex [extra_args..]\n\n"
         << bw << "Recursively find files matching regex and run command for each." << r << "\n\n"
@@ -1188,8 +1209,8 @@ int main(int argc, char **argv) {
     size_t min_pos = opts.expr_str.empty() ? 3 : 2;
     if (positional.size() < min_pos) {
         print_error(opts.expr_str.empty()
-            ? "at least three positional arguments required (or use --expr)."
-            : "at least two positional arguments required with --expr.");
+                        ? "at least three positional arguments required (or use --expr)."
+                        : "at least two positional arguments required with --expr.");
         print_help(argv[0]);
         return EXIT_FAILURE;
     }

@@ -122,8 +122,10 @@ shell-cmd [options] <path> "<command %1 [%2 %3..]>" <regex> [extra_args..]
 ### Options
 
 | Short | Long | Description |
-|-------|------|-------------|| `-z` | `--regex-match` | **Regex match** — use `regex_match` (full path must match) instead of `regex_search` |
-| `-b` | `--glob` | **Glob mode** — treat pattern as a glob (`*`, `?`) instead of regex || `-n` | `--dry-run` | **Dry-run** — print each command but don’t execute it |
+|-------|------|-------------|
+| `-z` | `--regex-match` | **Regex match** — use `regex_match` (full path must match) instead of `regex_search` |
+| `-b` | `--glob` | **Glob mode** — treat pattern as a glob (`*`, `?`) instead of regex |
+| `-n` | `--dry-run` | **Dry-run** — print each command but don’t execute it |
 | `-v` | `--verbose` | **Verbose** — print each command before executing it |
 | `-a` | `--all` | **All files** — include hidden files and directories |
 | `-l` | `--list-all` | **List all** — collect all matches and run command once with `%0` = all matched paths |
