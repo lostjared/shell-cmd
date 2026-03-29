@@ -41,6 +41,7 @@ shell-cmd [options] path "command %1 [%2 %3..]" regex [extra_args..]
 | `-n` | `--dry-run` | Dry-run — print commands without executing |
 | `-v` | `--verbose` | Verbose — print each command before running |
 | `-a` | `--all` | Include hidden files and directories |
+| `-l` | `--list-all` | Run one command with `%0` set to a space-delimited list of all matched paths |
 | `-d N` | `--depth N` | Max recursion depth (0 = current directory only) |
 | `-s SIZE` | `--size SIZE` | Filter by size: `+10M` (>10 MB), `-1K` (<1 KB), `4096` (exact). Suffixes: K, M, G |
 | `-m DAYS` | `--mtime DAYS` | Filter by modification time: `+7` (older than 7 days), `-1` (within last day) |
@@ -92,6 +93,14 @@ Include hidden files:
 ```bash
 shell-cmd -a ~ "echo %1" ".*\.bashrc"
 ```
+
+Run a single batch command with all matches using list-all:
+
+```bash
+shell-cmd -l . "ls -l %0" ".*\.log$"
+```
+
+In this mode, `%0` is substituted with a single space-separated string containing every matched path.
 
 Extract all `.7z` archives:
 
@@ -168,6 +177,8 @@ shell-cmd -e ./src "gcc -c %1 -o /tmp/%b.o" ".*\.c$"
 ## How It Works
 
 The program recursively walks the specified directory using `std::filesystem`. For each file whose path matches the given regex, it substitutes placeholders in the command template and executes it via the configured shell (`/bin/bash` by default). Hidden files and directories are skipped by default.
+
+When using `-l` or `--list-all`, `shell-cmd` does not run a command per file; it collects all matched paths, joins them with spaces, and runs the command exactly once with `%0` replaced by the full list string.
 
 ## shell-cmd vs `find -exec`
 

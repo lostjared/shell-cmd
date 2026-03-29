@@ -337,6 +337,16 @@ Or equivalently with short flags:
 shell-cmd . "ls -lh %1" ".*" -s +10M
 ```
 
+### 18. List All Matches in One Command (list-all)
+
+Use `-l`/`--list-all` when you want a single command invocation with all matches joined into one string and substituted by `%0`:
+
+```bash
+shell-cmd -l . "echo Found files: %0" ".*\.log$"
+```
+
+In this case, `shell-cmd` first collects all matched files and then executes only one command, instead of running the command once per file.
+
 ### 18. Delete Old Temp Files (Dry-Run)
 
 Preview deleting `.tmp` files older than 30 days:

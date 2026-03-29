@@ -139,6 +139,18 @@ shell-cmd -a ~ "echo %1" ".*\.bashrc|.*\.zshrc"
 
 ---
 
+## List All Matches Once (list-all)
+
+Use `-l`/`--list-all` to run one command for every match as a single argument list in `%0`:
+
+```bash
+shell-cmd -l . "grep -E 'error|warn' %0" ".*\.log$"
+```
+
+This collects all matched `.log` paths and then executes `grep` once with the full list.
+
+---
+
 ## Combine Options
 
 Preview (`-n`), include hidden files (`-a`), and limit depth to 2 levels (`-d 2`):

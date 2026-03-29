@@ -67,8 +67,8 @@ struct Options {
     int jobs = 1;                ///< Number of parallel jobs (1 = sequential).
     std::string shell = "/bin/bash"; ///< Shell to use for command execution.
     std::string shell_name = "bash"; ///< Shell argv[0] name.
-    bool collect_all = false; ///< Collect all files
-    
+    bool collect_all = false; ///< If true (via -l/--list-all), collect all matched file paths and run one command with a combined argument list.
+
 };
 
 static Options opts; ///< Global runtime options.
@@ -531,11 +531,15 @@ std::string join(std::vector<std::string> &v) {
 
 /**
  * @brief Substitute placeholders in a command template and execute the result.
- * @details Replaces %%0 (filename), %%1 (full path), %%b (stem), %%e (extension),
- *          and %%2+ (extra args). Supports confirm mode, dry-run, parallel forking,
- *          and stop-on-error.
+ * @details
+ *   - Default mode (one invocation per match): %0=basename, %1=full path, %2+ extra args.
+ *   - --list-all mode (-l): collects all matching file paths into a single space-delimited
+ *     string and passes this as file_string. In this mode %0 is replaced with the full
+ *     list of matches, not individual filenames.
+ *   - Supports confirm mode, dry-run, parallel forking, and stop-on-error.
  * @param cmd  The command template string.
  * @param text Span of strings: text[0] is the matched file path, text[1+] are extras.
+ * @param file_string When --list-all is set, contains all matched paths joined by spaces.
  * @return true to continue processing, false to stop (stop-on-error triggered).
  */
 bool proc_cmd(const std::string &cmd, std::span<const std::string> text, std::string file_string) {
@@ -629,17 +633,17 @@ void print_help(const char *prog) {
         "usage: {} [options] path \"command %1 [%2 %3..]\" regex [extra_args..]\n\n"
         "Recursively find files matching regex and run command for each.\n\n"
         "placeholders:\n"
-        "  %0          filename only (no path) not in list-all mode\n"
+        "  %0          filename only (no path, per-match mode)\n"
         "  %1          full path to matched file\n"
         "  %2+         extra arguments from command line\n"
         "  %b          basename without extension\n"
         "  %e          file extension (including dot)\n\n"
-        "  %0          for -l or --list-all single command with all matches\n"
+        "  (with -l/--list-all) %0 expands to all matched paths joined by spaces\n"
         "options:\n"
         "  -n, --dry-run       dry-run, print commands without executing\n"
         "  -v, --verbose       verbose, print each command before running\n"
         "  -a, --all           include hidden files/directories\n"
-        "  -l, --list-all      single command with all files.\n"
+        "  -l, --list-all      collect all matches and invoke command once with %0=all-matches\n"
         "  -d, --depth N       max recursion depth (0 = current dir only)\n"
         "  -s, --size SIZE     filter by size: +10M (>10MB), -1K (<1KB),\n"
         "                      4096 (exactly 4096 bytes). Suffixes: K, M, G\n"
