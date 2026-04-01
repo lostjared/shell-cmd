@@ -673,6 +673,7 @@ void fill_list(const fs::path &path, const std::string &cmd, const std::string &
                 auto fullpath = entry.path().string();
                 if (entry_matches_path(fullpath, regex_str) && matches_filters(entry)) {
                     stats.files_matched++;
+		    files.push_back(fullpath);
                     return;
                 }
             }
